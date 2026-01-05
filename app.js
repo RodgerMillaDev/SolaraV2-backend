@@ -18,6 +18,21 @@ app.get("/", (req,res)=>{
 
 })
 
+const server = http.createServer(app);
+const wss = new WebSocket.Server({server});
+
+wss.on("connection", (ws)=>{
+    console.log("theres a connection")
+})
+wss.on("close", (ws)=>{
+    console.log("kuna connection imefungwa")
+})
+
+wss.on("error", (ws)=>{
+    console.log("kuna error majamaaa")
+})
+
+
 
 //  admin set claims 
 
@@ -62,19 +77,6 @@ app.post("/uploadAITask", upload.none(), async (req,res)=>{
    
 })
 
-const server = http.createServer(app);
-const wss = new WebSocket.Server([server]);
-
-wss.on("connection", (ws)=>{
-    console.log("theres a connection")
-})
-wss.on("close", (ws)=>{
-    console.log("kuna connection imefungwa")
-})
-
-wss.on("error", (ws)=>{
-    console.log("kuna error majamaaa")
-})
 
 app.post("/Aloo", (req,res)=>{
     res.json({message: "Wozaaaa"})
