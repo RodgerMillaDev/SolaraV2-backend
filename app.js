@@ -23,11 +23,11 @@ const wss = new WebSocket.Server({ server });
 
 let userConnections = new Map(); // uid -> set of ws
 
-wss.on("connection", (ws) => {
+wss.on("connection",  (ws) => {
     console.log("New connection");
 
     // Expect client to send uid immediately
-    ws.on("message", (msg) => {
+    ws.on("message", async (msg) => {
         try {
             const data = JSON.parse(msg);
             if (data.type === "init" && data.uid) {
@@ -40,6 +40,98 @@ wss.on("connection", (ws) => {
 
                 console.log(`User ${data.uid} connected, total devices: ${userConnections.get(data.uid).size}`);
             }
+
+             if (data.type === "requestTask" && data.uid) {
+
+        const userRef = firestore.collection("Users").doc(data.uid);
+        const userSnap = await userRef.get();
+
+
+            
+        // ❌ User does not exist
+        if (!userSnap.exists) {
+          ws.send(JSON.stringify({
+            type: "taskResponse",
+            status: "error",
+            reason: "User not found"
+          }));
+          return;
+        }
+
+        const user = userSnap.data();
+
+        // ❌ Not eligible
+        if (!user.jobEligibility) {
+          ws.send(JSON.stringify({
+            type: "taskResponse",
+            status: "denied",
+            reason: "Not eligible for tasks"
+          }));
+          return;
+        }
+
+        // ❌ Daily limit reached
+        if (user.dailyTaskTaken >= 20) {
+          ws.send(JSON.stringify({
+            type: "taskResponse",
+            status: "denied",
+            reason: "Daily task limit reached"
+          }));
+          return;
+        }
+
+        // ❌ Already working on a task
+        if (user.taskID) {
+          ws.send(JSON.stringify({
+            type: "taskResponse",
+            status: "denied",
+            reason: "You are already working on a task"
+          }));
+          return;
+        }
+
+        // ✅ USER IS ELIGIBLE → FETCH TASK
+        const taskQuery = await firestore
+          .collection("Ai-tasks")
+          .where("status", "==", "active")
+          .limit(1)
+          .get();
+
+        if (taskQuery.empty) {
+          ws.send(JSON.stringify({
+            type: "taskResponse",
+            status: "empty",
+            reason: "No tasks available"
+          }));
+          return;
+        }
+
+        const taskDoc = taskQuery.docs[0];
+        const task = taskDoc.data();
+
+        // 🔐 ASSIGN TASK (atomic update)
+        await userRef.update({
+          taskID: task.taskId,
+          dailyTaskTaken: admin.firestore.FieldValue.increment(1)
+        });
+
+        await taskDoc.ref.update({
+          assignCount: admin.firestore.FieldValue.increment(1)
+        });
+
+        // 📤 SEND TASK TO USER
+        ws.send(JSON.stringify({
+          type: "taskAssigned",
+          task: {
+            taskId: task.taskId,
+            instructions: task.instructions,
+            originaltext: task.originaltext,
+            pay: task.pay
+          }
+        }));
+      }
+
+
         } catch (err) {
             console.error("Invalid message", err);
         }
