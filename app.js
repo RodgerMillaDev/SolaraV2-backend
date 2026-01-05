@@ -19,19 +19,46 @@ app.get("/", (req,res)=>{
 })
 
 const server = http.createServer(app);
-const wss = new WebSocket.Server({server});
+const wss = new WebSocket.Server({ server });
 
-wss.on("connection", (ws)=>{
-    console.log("theres a connection")
-})
-wss.on("close", (ws)=>{
-    console.log("kuna connection imefungwa")
-})
+let userConnections = new Map(); // uid -> set of ws
 
-wss.on("error", (ws)=>{
-    console.log("kuna error majamaaa")
-})
+wss.on("connection", (ws) => {
+    console.log("New connection");
 
+    // Expect client to send uid immediately
+    ws.on("message", (msg) => {
+        try {
+            const data = JSON.parse(msg);
+            if (data.type === "init" && data.uid) {
+                ws.uid = data.uid;
+
+                if (!userConnections.has(data.uid)) {
+                    userConnections.set(data.uid, new Set());
+                }
+                userConnections.get(data.uid).add(ws);
+
+                console.log(`User ${data.uid} connected, total devices: ${userConnections.get(data.uid).size}`);
+            }
+        } catch (err) {
+            console.error("Invalid message", err);
+        }
+    });
+
+    ws.on("close", () => {
+        if (ws.uid && userConnections.has(ws.uid)) {
+            userConnections.get(ws.uid).delete(ws);
+            if (userConnections.get(ws.uid).size === 0) {
+                userConnections.delete(ws.uid);
+            }
+            console.log(`User ${ws.uid} disconnected`);
+        }
+    });
+
+    ws.on("error", (err) => {
+        console.error("WebSocket error", err);
+    });
+});
 
 
 //  admin set claims 
