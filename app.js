@@ -83,6 +83,6 @@ app.post("/Aloo", (req,res)=>{
 })
 
 
-app.listen(port, ()=>{
+server.listen(port, ()=>{
     console.log(`Hello Rodger you app is running on port ${port}`)
 })
