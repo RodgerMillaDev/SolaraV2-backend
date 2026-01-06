@@ -118,6 +118,7 @@ wss.on("connection",  (ws) => {
         await taskDoc.ref.update({
           assignCount: admin.firestore.FieldValue.increment(1)
         });
+        console.log("task sent")
 
         // 📤 SEND TASK TO USER
         ws.send(JSON.stringify({
