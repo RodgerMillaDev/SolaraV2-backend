@@ -100,6 +100,8 @@ wss.on("connection",  (ws) => {
           }));
           return;
         }
+
+        let assignedTasks = []
 const availableTasks = taskQuery.docs.map(doc => ({
   taskId: doc.id,
   ...doc.data()
