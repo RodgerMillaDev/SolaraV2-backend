@@ -28,6 +28,7 @@ wss.on("connection",  (ws) => {
 
     // Expect client to send uid immediately
     ws.on("message", async (msg) => {
+      console.log("kuna message imekam")
         try {
             const data = JSON.parse(msg);
             if (data.type === "init" && data.uid) {
@@ -125,6 +126,9 @@ wss.on("connection",  (ws) => {
             pay: task.pay
           }
         }));
+      }else{
+      console.log("valid request received sent")
+
       }
 
 
