@@ -128,7 +128,7 @@ wss.on("connection",  (ws) => {
         }));
       }else{
       console.log("valid request received sent")
-      console.log(msg)
+      console.log(data)
 
       }
 
