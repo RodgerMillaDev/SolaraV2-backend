@@ -118,7 +118,7 @@ await admin.firestore().runTransaction(async (tx) => {
 
     tx.update(taskRef, {
       assignCount: admin.firestore.FieldValue.increment(1),
-      assignedTo: uid
+      assignedTo: data.uid
     });
 
     assignedTasks.push({
