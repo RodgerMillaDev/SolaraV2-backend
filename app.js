@@ -128,6 +128,7 @@ await admin.firestore().runTransaction(async (tx) => {
       instructions: task.instructions,
       originaltext: task.originaltext,
       pay: task.pay,
+      status: "pending",
       type: task.type
     });
   }
