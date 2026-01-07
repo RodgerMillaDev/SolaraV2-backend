@@ -28,7 +28,6 @@ wss.on("connection",  (ws) => {
 
     // Expect client to send uid immediately
     ws.on("message", async (msg) => {
-      console.log("kuna message imekam")
         try {
             const data = JSON.parse(msg);
             if (data.type === "init" && data.uid) {
@@ -49,7 +48,7 @@ wss.on("connection",  (ws) => {
           ws.send(JSON.stringify({
             type: "taskResponse",
             status: "error",
-            reason: "User not found"
+            reason: "An error occured. Try again later."
           }));
           return;
         }
@@ -61,7 +60,7 @@ wss.on("connection",  (ws) => {
           ws.send(JSON.stringify({
             type: "taskResponse",
             status: "denied",
-            reason: "Not eligible for tasks"
+            reason: "You are not eligible for tasks at the moment."
           }));
           return;
         }
@@ -71,7 +70,7 @@ wss.on("connection",  (ws) => {
           ws.send(JSON.stringify({
             type: "taskResponse",
             status: "denied",
-            reason: "Daily task limit reached"
+            reason: "Sorry, you've reached your daily task limit!"
           }));
           return;
         }
@@ -81,7 +80,7 @@ wss.on("connection",  (ws) => {
           ws.send(JSON.stringify({
             type: "taskResponse",
             status: "denied",
-            reason: "You are already working on a task"
+            reason: "You have already been assigned an AI task."
           }));
           return;
         }
@@ -105,30 +104,31 @@ wss.on("connection",  (ws) => {
         const taskDoc = taskQuery.docs[0];
         const task = taskDoc.data();
 
-        // 🔐 ASSIGN TASK (atomic update)
-        await userRef.update({
-          taskID: task.taskId,
-          dailyTaskTaken: admin.firestore.FieldValue.increment(1)
-        });
+     const assignedTasks = [];
+        await admin.firestore().runTransaction(async (tx) => {
+            // Update user once
+            tx.update(userRef, {
+              dailyTaskTaken: admin.firestore.FieldValue.increment(tasksToAssign.length)
+            });
+            for (const task of tasksToAssign) {
+              const taskRef = admin.firestore().collection("tasks").doc(task.taskId);
 
-        await taskDoc.ref.update({
-          assignCount: admin.firestore.FieldValue.increment(1)
-        });
-        console.log("task sent")
+              tx.update(taskRef, {
+                assignCount: admin.firestore.FieldValue.increment(1),
+                assignedTo: uid // optional but recommended
+              });
+              assignedTasks.push({
+                taskId: task.taskId,
+                instructions: task.instructions,
+                originaltext: task.originaltext,
+                pay: task.pay,
+                type: task.type
+              });
+            }
+          });
 
-        // 📤 SEND TASK TO USER
-        ws.send(JSON.stringify({
-          type: "taskAssigned",
-          task: {
-            taskId: task.taskId,
-            instructions: task.instructions,
-            originaltext: task.originaltext,
-            pay: task.pay
-          }
-        }));
       }else{
-      console.log("valid request received sent")
-      console.log(data)
+      console.log("invalid request received")
 
       }
 
