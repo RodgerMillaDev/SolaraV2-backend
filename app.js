@@ -32,22 +32,17 @@ wss.on("connection",  (ws) => {
             const data = JSON.parse(msg);
             if (data.type === "init" && data.uid) {
                 ws.uid = data.uid;
-
                 if (!userConnections.has(data.uid)) {
                     userConnections.set(data.uid, new Set());
                 }
                 userConnections.get(data.uid).add(ws);
-
                 console.log(`User ${data.uid} connected, total devices: ${userConnections.get(data.uid).size}`);
             }
-
              if (data.type === "requestTask" && data.uid) {
-
+              console.log("task request received")
         const userRef = firestore.collection("Users").doc(data.uid);
         const userSnap = await userRef.get();
 
-
-            
         // ❌ User does not exist
         if (!userSnap.exists) {
           ws.send(JSON.stringify({
