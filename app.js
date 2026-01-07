@@ -100,33 +100,39 @@ wss.on("connection",  (ws) => {
           }));
           return;
         }
+const assignedTasks = [];
 
-        const taskDoc = taskQuery.docs[0];
-        const task = taskDoc.data();
+await admin.firestore().runTransaction(async (tx) => {
+  // Update user once
+  tx.update(userRef, {
+    dailyTaskTaken: admin.firestore.FieldValue.increment(tasksToAssign.length)
+  });
 
-     const assignedTasks = [];
-        await admin.firestore().runTransaction(async (tx) => {
-            // Update user once
-            tx.update(userRef, {
-              dailyTaskTaken: admin.firestore.FieldValue.increment(tasksToAssign.length)
-            });
-            for (const task of tasksToAssign) {
-              const taskRef = admin.firestore().collection("tasks").doc(task.taskId);
+  for (const task of tasksToAssign) {
+    const taskRef = admin.firestore().collection("tasks").doc(task.taskId);
 
-              tx.update(taskRef, {
-                assignCount: admin.firestore.FieldValue.increment(1),
-                assignedTo: uid // optional but recommended
-              });
-              assignedTasks.push({
-                taskId: task.taskId,
-                instructions: task.instructions,
-                originaltext: task.originaltext,
-                pay: task.pay,
-                type: task.type
-              });
-            }
-          });
+    tx.update(taskRef, {
+      assignCount: admin.firestore.FieldValue.increment(1),
+      assignedTo: uid // optional but recommended
+    });
 
+    assignedTasks.push({
+      taskId: task.taskId,
+      instructions: task.instructions,
+      originaltext: task.originaltext,
+      pay: task.pay,
+      type: task.type
+    });
+  }
+});
+
+
+        // 📤 SEND TASK TO USER
+        ws.send(JSON.stringify({
+          type: "taskAssigned",
+          tasks: assignedTasks
+                
+        }));
       }else{
       console.log("invalid request received")
 
