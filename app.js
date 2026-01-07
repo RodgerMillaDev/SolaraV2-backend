@@ -89,7 +89,7 @@ wss.on("connection",  (ws) => {
         const taskQuery = await firestore
           .collection("Ai-tasks")
           .where("status", "==", "active")
-          .limit(1)
+          .limit(4)
           .get();
 
         if (taskQuery.empty) {
@@ -100,20 +100,25 @@ wss.on("connection",  (ws) => {
           }));
           return;
         }
-const assignedTasks = [];
+const availableTasks = taskQuery.docs.map(doc => ({
+  taskId: doc.id,
+  ...doc.data()
+}));
+
+const tasksToAssign = availableTasks.slice(0, 4);
 
 await admin.firestore().runTransaction(async (tx) => {
-  // Update user once
+  // update user once
   tx.update(userRef, {
     dailyTaskTaken: admin.firestore.FieldValue.increment(tasksToAssign.length)
   });
 
   for (const task of tasksToAssign) {
-    const taskRef = admin.firestore().collection("tasks").doc(task.taskId);
+    const taskRef = firestore.collection("Ai-tasks").doc(task.taskId);
 
     tx.update(taskRef, {
       assignCount: admin.firestore.FieldValue.increment(1),
-      assignedTo: uid // optional but recommended
+      assignedTo: uid
     });
 
     assignedTasks.push({
