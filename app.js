@@ -145,7 +145,7 @@ await admin.firestore().runTransaction(async (tx) => {
            const batch = firestore.batch();
 
         for(const task of assignedTasks){
-          const taskRef = firestore.collection("Users").doc(uid).collection("assignedTasks").doc(task.taskId)
+          const taskRef = firestore.collection("Users").doc(data.uid).collection("assignedTasks").doc(task.taskId)
           batch.set(taskRef,{
             taskId: task.taskId,
             type: task.type,
