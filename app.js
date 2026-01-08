@@ -96,7 +96,7 @@ wss.on("connection",  (ws) => {
           ws.send(JSON.stringify({
             type: "taskResponse",
             status: "No Tasks Available",
-            reason: "Sorry we have no tasks available, try again later."
+            reason: "Sorry, we have no tasks at the moment. Try again later."
           }));
           return;
         }
