@@ -150,6 +150,8 @@ await admin.firestore().runTransaction(async (tx) => {
             taskId: task.taskId,
             type: task.type,
             pay: task.pay,
+            instructions: task.instructions,
+            originaltext: task.originaltext,
             status: task.status,
             assignedAt: admin.firestore.FieldValue.serverTimestamp(),
           })
