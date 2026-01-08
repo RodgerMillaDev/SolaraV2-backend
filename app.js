@@ -128,19 +128,45 @@ await admin.firestore().runTransaction(async (tx) => {
       instructions: task.instructions,
       originaltext: task.originaltext,
       pay: task.pay,
-      status: "pending",
+      status: "Pending",
       type: task.type
     });
   }
 });
 
 
-        // 📤 SEND TASK TO USER
-        ws.send(JSON.stringify({
-          type: "taskAssigned",
-          tasks: assignedTasks
+        // // 📤 SEND TASK TO USER
+        // ws.send(JSON.stringify({
+        //   type: "taskAssigned",
+        //   tasks: assignedTasks
                 
-        }));
+        // }));
+        async function saveTask(){
+           const batch = firestore.batch();
+
+        for(const task of assignedTasks){
+          const taskRef = firestore.collection("Users").doc(uid).collection("assignedTasks").doc(task.taskId)
+          batch.set(taskRef,{
+            taskId: task.taskId,
+            type: task.type,
+            pay: task.pay,
+            status: task.status,
+            assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+          })
+        }
+        await batch.commit()
+        firestore.collection('User').doc(uid).update({
+          hasTasks: true,
+        })
+        }
+        saveTask()
+
+
+       
+
+     
+
+
       }else{
       console.log("invalid request received")
 
@@ -220,3 +246,6 @@ app.post("/Aloo", (req,res)=>{
 server.listen(port, ()=>{
     console.log(`Hello Rodger you app is running on port ${port}`)
 })
+
+
+
