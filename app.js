@@ -47,7 +47,7 @@ wss.on("connection",  (ws) => {
         if (!userSnap.exists) {
           ws.send(JSON.stringify({
             type: "taskResponse",
-            status: "error",
+            status: "Error",
             reason: "An error occured. Try again later."
           }));
           return;
@@ -59,7 +59,7 @@ wss.on("connection",  (ws) => {
         if (!user.jobEligibility) {
           ws.send(JSON.stringify({
             type: "taskResponse",
-            status: "denied",
+            status: "Not Eligible",
             reason: "You are not eligible for tasks at the moment."
           }));
           return;
@@ -69,7 +69,7 @@ wss.on("connection",  (ws) => {
         if (user.dailyTaskTaken >= 20) {
           ws.send(JSON.stringify({
             type: "taskResponse",
-            status: "denied",
+            status: "Limit Reached",
             reason: "Sorry, you've reached your daily task limit!"
           }));
           return;
@@ -79,7 +79,7 @@ wss.on("connection",  (ws) => {
         if (user.taskID) {
           ws.send(JSON.stringify({
             type: "taskResponse",
-            status: "denied",
+            status: "Denied",
             reason: "You have already been assigned an AI task."
           }));
           return;
@@ -95,8 +95,8 @@ wss.on("connection",  (ws) => {
         if (taskQuery.empty) {
           ws.send(JSON.stringify({
             type: "taskResponse",
-            status: "empty",
-            reason: "No tasks available"
+            status: "No Tasks Available",
+            reason: "Sorry we have no tasks available, try again later."
           }));
           return;
         }
