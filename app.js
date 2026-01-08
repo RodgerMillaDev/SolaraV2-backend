@@ -157,7 +157,7 @@ await admin.firestore().runTransaction(async (tx) => {
           })
         }
         await batch.commit()
-        firestore.collection('User').doc(uid).update({
+        firestore.collection('User').doc(data.uid).update({
           hasTasks: true,
         })
         }
