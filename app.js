@@ -134,7 +134,6 @@ await admin.firestore().runTransaction(async (tx) => {
   }
 });
 
-
         // // 📤 SEND TASK TO USER
         // ws.send(JSON.stringify({
         //   type: "taskAssigned",
@@ -157,7 +156,7 @@ await admin.firestore().runTransaction(async (tx) => {
           })
         }
         await batch.commit()
-        firestore.collection('User').doc(data.uid).update({
+        firestore.collection('Users').doc(data.uid).update({
           hasTasks: true,
         })
         }
