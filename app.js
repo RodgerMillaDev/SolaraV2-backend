@@ -25,18 +25,11 @@ const wss = new WebSocket.Server({ server });
 
 let userConnections = new Map(); // uid -> set of ws
 
-
 // 1️⃣ GLOBAL TIMER REGISTRY
 const activeTaskTimers = new Map();
 
 // 2️⃣ TIMER FUNCTION (GOES HERE)
-const startTaskTimer = ({
-  ws,
-  userId,
-  taskId,
-  duration,
-  startedAt
-}) => {
+const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
   const key = `${userId}_${taskId}`;
 
   if (activeTaskTimers.has(key)) return;
@@ -58,19 +51,22 @@ const startTaskTimer = ({
           .doc(taskId)
           .update({ status: "completed" });
 
-        ws.send(JSON.stringify({
-          type: "taskComplete",
-          taskId
-        }));
+        ws.send(
+          JSON.stringify({
+            type: "taskComplete",
+            taskId,
+          })
+        );
         return;
       }
 
-      ws.send(JSON.stringify({
-        type: "timerUpdate",
-        taskId,
-        remainingTime: remaining
-      }));
-
+      ws.send(
+        JSON.stringify({
+          type: "timerUpdate",
+          taskId,
+          remainingTime: remaining,
+        })
+      );
     } catch (err) {
       console.error("Timer error:", err);
     }
@@ -79,27 +75,66 @@ const startTaskTimer = ({
   activeTaskTimers.set(key, intervalId);
 };
 
-
 wss.on("connection", (ws) => {
   console.log("New connection");
 
   // Expect client to send uid immediately
   ws.on("message", async (msg) => {
-
     try {
       const data = JSON.parse(msg);
-      if (data.type === "init" && data.uid) {
-        ws.uid = data.uid;
-        if (!userConnections.has(data.uid)) {
-          userConnections.set(data.uid, new Set());
-        }
-        userConnections.get(data.uid).add(ws);
-        console.log(
-          `User ${data.uid} connected, total devices: ${
-            userConnections.get(data.uid).size
-          }`
-        );
+    if (data.type === "init" && data.uid) {
+  ws.uid = data.uid;
+  ws.taskId = data.taskId || null;
+
+  // ---------- register socket ----------
+  if (!userConnections.has(ws.uid)) {
+    userConnections.set(ws.uid, new Set());
+  }
+  userConnections.get(ws.uid).add(ws);
+
+  console.log(
+    `User ${ws.uid} connected, devices: ${
+      userConnections.get(ws.uid).size
+    }`
+  );
+
+  // ---------- 🔁 RESUME TASK IF PRESENT ----------
+  if (ws.taskId) {
+    try {
+      const task = await getTaskFromDB(ws.uid, ws.taskId);
+
+      if (!task) {
+        ws.send(JSON.stringify({
+          type: "resumeError",
+          reason: "Task not found or unauthorized"
+        }));
+        return;
       }
+
+      if (task.status === "Complete") {
+        ws.send(JSON.stringify({ type: "taskComplete" }));
+        return;
+      }
+
+      const now = Date.now();
+      const elapsed = Math.floor((now - task.startedAt) / 1000);
+      const remaining = Math.max(task.duration - elapsed, 0);
+
+      ws.send(JSON.stringify({
+        type: "timerUpdate",
+        remainingTime: remaining
+      }));
+
+      console.log(
+        `Resumed task ${ws.taskId} for user ${ws.uid}, remaining ${remaining}s`
+      );
+
+    } catch (err) {
+      console.error("Resume failed:", err);
+    }
+  }
+}
+
       if (data.type === "requestTask" && data.uid) {
         const userRef = firestore.collection("Users").doc(data.uid);
         const userSnap = await userRef.get();
@@ -239,80 +274,63 @@ wss.on("connection", (ws) => {
         }
         saveTask();
       }
-     if (data.type === "startTask" && data.userId && data.taskId) {
+      if (data.type === "startTask" && data.userId && data.taskId) {
+        const duration = 300; // seconds
 
-  const duration = 300; // seconds
+        const taskRef = firestore
+          .collection("Users")
+          .doc(data.userId)
+          .collection("assignedTasks")
+          .doc(data.taskId);
 
-  const taskRef = firestore
-    .collection("Users")
-    .doc(data.userId)
-    .collection("assignedTasks")
-    .doc(data.taskId);
+        try {
+          // 1️⃣ Update Firestore FIRST
+          await taskRef.update({
+            status: "active",
+            assignedAt: serverTimestamp(),
+            durationSec: duration,
+          });
 
-  try {
-    // 1️⃣ Update Firestore FIRST
-    await taskRef.update({
-      status: "active",
-      assignedAt: serverTimestamp(),
-      durationSec: duration,
-    });
+          console.log("Task started for:", data.userId);
 
-    console.log("Task started for:", data.userId);
+          // 2️⃣ READ BACK server timestamp (CRITICAL)
+          const snap = await taskRef.get();
 
-    // 2️⃣ READ BACK server timestamp (CRITICAL)
-    const snap = await taskRef.get();
+          if (!snap.exists) {
+            throw new Error("Task document not found after update");
+          }
 
-    if (!snap.exists) {
-      throw new Error("Task document not found after update");
-    }
+          const startedAt = snap.data().assignedAt.toMillis();
 
-    const startedAt = snap.data().assignedAt.toMillis();
+          // 3️⃣ START SERVER TIMER ⏱️
+          startTaskTimer({
+            ws,
+            userId: data.userId,
+            taskId: data.taskId,
+            duration,
+            startedAt,
+          });
 
-    // 3️⃣ START SERVER TIMER ⏱️
-    startTaskTimer({
-      ws,
-      userId: data.userId,
-      taskId: data.taskId,
-      duration,
-      startedAt,
-    });
+          // 4️⃣ Respond to client
+          ws.send(
+            JSON.stringify({
+              type: "startTaskResponse",
+              msg: "You are ready to begin",
+            })
+          );
+        } catch (error) {
+          console.error("Task launch failed:", error);
 
-    // 4️⃣ Respond to client
-    ws.send(JSON.stringify({
-      type: "startTaskResponse",
-      msg: "You are ready to begin",
-    }));
-
-  } catch (error) {
-    console.error("Task launch failed:", error);
-
-    ws.send(JSON.stringify({
-      type: "startTaskError",
-      msg: "Sorry, an error occurred when starting the task",
-    }));
-  }
-}
-if (data.type === "resumeTask") {
-    const { userId, taskId } = data;
-    const task = await getTaskFromDB(userId, taskId);
-
-    const now = Date.now();
-    const elapsed = Math.floor((now - task.startedAt) / 1000);
-    const remaining = Math.max(task.duration - elapsed, 0);
-
-    ws.send(JSON.stringify({
-      type: "timerUpdate",
-      remainingTime
-    }));
-
-    if (remaining <= 0) {
-      ws.send(JSON.stringify({ type: "task-complete" }));
-    }
-  }
-
-       else {
+          ws.send(
+            JSON.stringify({
+              type: "startTaskError",
+              msg: "Sorry, an error occurred when starting the task",
+            })
+          );
+        }
+      }else {
         console.log("invalid request received");
-        console.log(data)
+        console.log(data);
       }
     } catch (err) {
       console.error("Invalid message", err);
@@ -392,7 +410,4 @@ server.listen(port, () => {
   console.log(`Hello Rodger you app is running on port ${port}`);
 });
 
-
-
-
-// timer function 
+// timer function
