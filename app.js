@@ -183,7 +183,7 @@ wss.on("connection", (ws) => {
         }
         saveTask();
       }
-      if(data.type === "startTasK" && data.userId && data.taskId){
+      if(data.type === "startTask" && data.userId && data.taskId){
         const userRef = firestore.collection("Users").doc(data.userId).collection("assignedTasks").doc(data.taskId);
         await userRef.update({
           status:"active",
