@@ -295,6 +295,7 @@ wss.on("connection", (ws) => {
 
        else {
         console.log("invalid request received");
+        console.log(data)
       }
     } catch (err) {
       console.error("Invalid message", err);
