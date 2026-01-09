@@ -59,14 +59,14 @@ const startTaskTimer = ({
           .update({ status: "completed" });
 
         ws.send(JSON.stringify({
-          type: "TASK_COMPLETED",
+          type: "taskComplete",
           taskId
         }));
         return;
       }
 
       ws.send(JSON.stringify({
-        type: "TIMER_UPDATE",
+        type: "timerUpdate",
         taskId,
         remainingTime: remaining
       }));
@@ -254,7 +254,7 @@ wss.on("connection", (ws) => {
     await taskRef.update({
       status: "active",
       assignedAt: serverTimestamp(),
-      duration: duration,
+      durationSec: duration,
     });
 
     console.log("Task started for:", data.userId);
