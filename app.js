@@ -30,8 +30,10 @@ wss.on("connection", (ws) => {
 
   // Expect client to send uid immediately
   ws.on("message", async (msg) => {
+
     try {
       const data = JSON.parse(msg);
+      console.log(data)
       if (data.type === "init" && data.uid) {
         ws.uid = data.uid;
         if (!userConnections.has(data.uid)) {
