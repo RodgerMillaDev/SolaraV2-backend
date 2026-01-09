@@ -29,10 +29,19 @@ let userConnections = new Map(); // uid -> set of ws
 const activeTaskTimers = new Map();
 
 // 2️⃣ TIMER FUNCTION (GOES HERE)
+// key = `${userId}_${taskId}`, value = { intervalId, sockets: Set<WebSocket>, duration, startedAt }
+
 const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
   const key = `${userId}_${taskId}`;
 
-  if (activeTaskTimers.has(key)) return;
+  // If timer already exists, just add this socket
+  if (activeTaskTimers.has(key)) {
+    activeTaskTimers.get(key).sockets.add(ws);
+    return;
+  }
+
+  // Otherwise, start a new timer
+  const sockets = new Set([ws]);
 
   const intervalId = setInterval(async () => {
     try {
@@ -40,6 +49,20 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
       const elapsed = Math.floor((now - startedAt) / 1000);
       const remaining = duration - elapsed;
 
+      // Broadcast to all sockets
+      sockets.forEach(s => {
+        try {
+          s.send(JSON.stringify({
+            type: "timerUpdate",
+            taskId,
+            remainingTime: remaining,
+          }));
+        } catch (err) {
+          console.error("Socket send error:", err);
+        }
+      });
+
+      // Task finished
       if (remaining <= 0) {
         clearInterval(intervalId);
         activeTaskTimers.delete(key);
@@ -51,29 +74,20 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
           .doc(taskId)
           .update({ status: "completed" });
 
-        ws.send(
-          JSON.stringify({
-            type: "taskComplete",
-            taskId,
-          })
-        );
-        return;
+        sockets.forEach(s => {
+          try {
+            s.send(JSON.stringify({ type: "taskComplete", taskId }));
+          } catch {}
+        });
       }
-
-      ws.send(
-        JSON.stringify({
-          type: "timerUpdate",
-          taskId,
-          remainingTime: remaining,
-        })
-      );
     } catch (err) {
       console.error("Timer error:", err);
     }
   }, 1000);
 
-  activeTaskTimers.set(key, intervalId);
+  activeTaskTimers.set(key, { intervalId, sockets, duration, startedAt });
 };
+
 
 wss.on("connection", (ws) => {
   console.log("New connection");
@@ -82,26 +96,29 @@ wss.on("connection", (ws) => {
   ws.on("message", async (msg) => {
     try {
       const data = JSON.parse(msg);
-    if (data.type === "init" && data.uid) {
+if (data.type === "init" && data.uid) {
   ws.uid = data.uid;
   ws.taskId = data.taskId || null;
 
-  // ---------- register socket ----------
-  if (!userConnections.has(ws.uid)) {
-    userConnections.set(ws.uid, new Set());
-  }
+  // Register socket globally
+  if (!userConnections.has(ws.uid)) userConnections.set(ws.uid, new Set());
   userConnections.get(ws.uid).add(ws);
 
   console.log(
-    `User ${ws.uid} connected, devices: ${
-      userConnections.get(ws.uid).size
-    }`
+    `User ${ws.uid} connected, devices: ${userConnections.get(ws.uid).size}`
   );
 
   // ---------- 🔁 RESUME TASK IF PRESENT ----------
   if (ws.taskId) {
     try {
-      const task = await getTaskFromDB(ws.uid, ws.taskId);
+      const taskRef = firestore
+        .collection("Users")
+        .doc(ws.uid)
+        .collection("assignedTasks")
+        .doc(ws.taskId);
+
+      const snap = await taskRef.get();
+      const task = snap.data();
 
       if (!task) {
         ws.send(JSON.stringify({
@@ -117,9 +134,10 @@ wss.on("connection", (ws) => {
       }
 
       const now = Date.now();
-      const elapsed = Math.floor((now - task.startedAt) / 1000);
-      const remaining = Math.max(task.duration - elapsed, 0);
+      const elapsed = Math.floor((now - task.assignedAt.toMillis()) / 1000);
+      const remaining = Math.max(task.durationSec - elapsed, 0);
 
+      // 1️⃣ Send immediate remaining time
       ws.send(JSON.stringify({
         type: "timerUpdate",
         remainingTime: remaining
@@ -129,11 +147,27 @@ wss.on("connection", (ws) => {
         `Resumed task ${ws.taskId} for user ${ws.uid}, remaining ${remaining}s`
       );
 
+      // 2️⃣ Attach socket to active timer OR start new one
+      const key = `${ws.uid}_${ws.taskId}`;
+      if (activeTaskTimers.has(key)) {
+        activeTaskTimers.get(key).sockets.add(ws);
+      } else {
+        startTaskTimer({
+          ws,
+          userId: ws.uid,
+          taskId: ws.taskId,
+          duration: task.durationSec,
+          startedAt: task.assignedAt.toMillis(),
+        });
+      }
+
     } catch (err) {
       console.error("Resume failed:", err);
+      ws.send(JSON.stringify({ type: "resumeError", reason: err.message }));
     }
   }
 }
+
 
       if (data.type === "requestTask" && data.uid) {
         const userRef = firestore.collection("Users").doc(data.uid);
