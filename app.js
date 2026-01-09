@@ -292,6 +292,23 @@ wss.on("connection", (ws) => {
     }));
   }
 }
+if (data.type === "resumeTask") {
+    const { userId, taskId } = data;
+    const task = await getTaskFromDB(userId, taskId);
+
+    const now = Date.now();
+    const elapsed = Math.floor((now - task.startedAt) / 1000);
+    const remaining = Math.max(task.duration - elapsed, 0);
+
+    ws.send(JSON.stringify({
+      type: "timerUpdate",
+      remainingTime
+    }));
+
+    if (remaining <= 0) {
+      ws.send(JSON.stringify({ type: "task-complete" }));
+    }
+  }
 
        else {
         console.log("invalid request received");
