@@ -241,7 +241,7 @@ wss.on("connection", (ws) => {
       }
      if (data.type === "startTask" && data.userId && data.taskId) {
 
-  const duration = 3000; // seconds
+  const duration = 300; // seconds
 
   const taskRef = firestore
     .collection("Users")
