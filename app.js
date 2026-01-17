@@ -72,11 +72,11 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
           .doc(userId)
           .collection("assignedTasks")
           .doc(taskId)
-          .update({ status: "completed" });
+          .update({ status: "Timed-out" });
 
         sockets.forEach(s => {
           try {
-            s.send(JSON.stringify({ type: "taskComplete", taskId }));
+            s.send(JSON.stringify({ type: "taskComplete", taskId , completeMethod:"Timed-out",payOut:0}));
           } catch {}
         });
       }
