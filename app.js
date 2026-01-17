@@ -359,7 +359,7 @@ if (data.type === "init" && data.uid) {
           );
         }
       }
-      if(data.type === "submitTask" && data.userId && data.taskId && data.originaltext && data.refinedText){
+      if(data.type === "submitTask" && data.userId && data.taskId && data.originalText && data.refinedText){
 
                 try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
