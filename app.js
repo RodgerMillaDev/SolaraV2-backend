@@ -380,46 +380,41 @@ wss.on("connection", (ws) => {
         data.originalText &&
         data.refinedText
       ) {
-        try {
-          const response = await fetch(
-            "https://openrouter.ai/api/v1/chat/completions",
+     
+          try {
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAIKEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "arcee-ai/trinity-mini:free",
+          messages: [
             {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${process.env.OPENAIKEY}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                model: "deepseek/deepseek-chat-v3-0324:free",
-                messages: [
-                  {
-                    role: "user",
-                    content: `Is the following text 
+              role: "user",
+              content: `
+                  Is this sentence grammatically correct?
 
-                        "${data.originaltext}" 
+                  "Pls read the instruction carefully before submitting the task. Many users rush that could be avoided with more patience."
 
-                        grammartically corrected with 
-
-                        "${data.refinedText}"
-
-                      Respond ONLY with "yes" or "no".
-               
-                      `,
-                  },
-                ],
-              }),
+                  Respond ONLY with "yes" or "no".
+              `,
             },
-          );
+          ],
+        }),
+      }
+    );
 
-          const result = await response.json();
-          console.log(result);
-          return result.choices[0].message.content
-            .toLowerCase()
-            .includes("yes");
-        } catch (error) {
-          console.error("Error checking topic match:", error.message || error);
-          return false; // fail-safe
-        }
+    const result = await response.json();
+    return result.choices[0].message.content .toLowerCase()
+
+  } catch (error) {
+    console.error("Error checking grammar:", error);
+    return false;
+  }
       } else {
         console.log("invalid request received");
         console.log(data);
@@ -503,3 +498,4 @@ server.listen(port, () => {
 });
 
 // timer function
+
