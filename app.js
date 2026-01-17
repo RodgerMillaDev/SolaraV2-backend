@@ -411,7 +411,7 @@ Respond ONLY with "yes" or "no".
     const result = await response.json();
 
     // 🛑 STOP TIMER HERE
-    const key = `${userId}_${taskId}`;
+    const key = `${data.uid}_${data.taskId}`;
 
     if (activeTaskTimers.has(key)) {
       const timer = activeTaskTimers.get(key);
@@ -421,9 +421,9 @@ Respond ONLY with "yes" or "no".
 
     await firestore
       .collection("Users")
-      .doc(userId)
+      .doc(data.uid)
       .collection("assignedTasks")
-      .doc(taskId)
+      .doc(data.taskId)
       .update({ status: "Completed" });
 
     const aiReply =
