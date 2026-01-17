@@ -410,8 +410,8 @@ wss.on("connection", (ws) => {
     );
 
     const result = await response.json();
-    console.log(result.choices[0].message.content .toLowerCase())
-    return result.choices[0].message.content .toLowerCase()
+    console.log(result.choices[0].message)
+    return result.choices[0].message.content.toLowerCase()
 
   } catch (error) {
     console.error("Error checking grammar:", error);
