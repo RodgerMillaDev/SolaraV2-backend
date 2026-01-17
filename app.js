@@ -411,21 +411,17 @@ wss.on("connection", (ws) => {
 
     const result = await response.json();
     console.log(result.choices[0].message)
-    return result.choices[0].message.content.toLowerCase()
+    return result.choices[0].message.content .toLowerCase()
 
   } catch (error) {
     console.error("Error checking grammar:", error);
     return false;
   }
-      } else {
-        console.log("invalid request received");
-        console.log(data);
-      }
+      }       
     } catch (err) {
       console.error("Invalid message", err);
     }
   });
-
   ws.on("close", () => {
     if (ws.uid && userConnections.has(ws.uid)) {
       userConnections.get(ws.uid).delete(ws);
@@ -435,7 +431,6 @@ wss.on("connection", (ws) => {
       console.log(`User ${ws.uid} disconnected`);
     }
   });
-
   ws.on("error", (err) => {
     console.error("WebSocket error", err);
   });
