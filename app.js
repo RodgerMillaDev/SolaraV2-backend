@@ -103,7 +103,6 @@ wss.on("connection", (ws) => {
   ws.on("message", async (msg) => {
     try {
       const data = JSON.parse(msg);
-      console.log(data)
       if (data.type === "init" && data.uid) {
         ws.uid = data.uid;
         ws.taskId = data.taskId || null;
@@ -380,6 +379,8 @@ wss.on("connection", (ws) => {
         data.originalText &&
         data.refinedText
       ) {
+              console.log(data)
+
      
           try {
     const response = await fetch(
@@ -409,6 +410,7 @@ wss.on("connection", (ws) => {
     );
 
     const result = await response.json();
+    console.log(result.choices[0].message.content .toLowerCase())
     return result.choices[0].message.content .toLowerCase()
 
   } catch (error) {
