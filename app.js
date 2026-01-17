@@ -379,8 +379,6 @@ wss.on("connection", (ws) => {
         data.originalText &&
         data.refinedText
       ) {
-              console.log(data)
-
      
           try {
     const response = await fetch(
@@ -410,8 +408,14 @@ wss.on("connection", (ws) => {
     );
 
     const result = await response.json();
-    console.log(result)
-    // return result.choices[0].message.content .toLowerCase()
+    console.log(result.choices[0].message.content.toLowerCase())
+    return result.choices[0].message.content.toLowerCase()
+    ws.send({
+      type:"taskComplete",
+      pay:0,
+      result:result.choices[0].message.content.toLowerCase()
+
+    })
 
   } catch (error) {
     console.error("Error checking grammar:", error);
@@ -496,3 +500,44 @@ server.listen(port, () => {
 
 // timer function
 
+
+
+async function Check(){
+            try {
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAIKEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "deepseek/deepseek-r1-0528:free",
+          messages: [
+            {
+              role: "user",
+              content: `
+                  Is this sentence grammatically correct?
+
+                  "Pls read the instruction carefully before submitting the task. Many users rush that could be avoided with more patience."
+
+                  Respond ONLY with "yes" or "no".
+              `,
+            },
+          ],
+        }),
+      }
+    );
+
+    const result = await response.json();
+    console.log(result.choices[0].message.content.toLowerCase())
+    return result.choices[0].message.content.toLowerCase()
+
+  } catch (error) {
+    console.error("Error checking grammar:", error);
+    return false;
+  }
+}
+
+Check()
