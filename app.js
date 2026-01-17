@@ -434,7 +434,7 @@ Respond ONLY with "yes" or "no".
         s.send(
           JSON.stringify({
             type: "taskComplete",
-            taskId,
+            taskId:data.taskId,
             payOut: 7,
             completeMethod: "Complete",
             taskResp: aiReply,
@@ -529,45 +529,3 @@ server.listen(port, () => {
 });
 
 // timer function
-
-
-
-async function Check(){
-            try {
-    const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAIKEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "deepseek/deepseek-r1-0528:free",
-          messages: [
-            {
-              role: "user",
-              content: `
-                  Is this sentence grammatically correct?
-
-                  "Pls read the instruction carefully before submitting the task. Many users rush that could be avoided with more patience."
-
-                  Respond ONLY with "yes" or "no".
-              `,
-            },
-          ],
-        }),
-      }
-    );
-
-    const result = await response.json();
-    console.log(result.choices[0].message.content.toLowerCase())
-    return result.choices[0].message.content.toLowerCase()
-
-  } catch (error) {
-    console.error("Error checking grammar:", error);
-    return false;
-  }
-}
-
-Check()
