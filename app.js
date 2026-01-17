@@ -410,7 +410,7 @@ wss.on("connection", (ws) => {
     );
 
     const result = await response.json();
-    console.log(result.choices[0].message.content.toLowerCase())
+    console.log(result)
 
         clearInterval(intervalId);
         activeTaskTimers.delete(key);
