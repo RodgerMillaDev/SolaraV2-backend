@@ -375,14 +375,13 @@ wss.on("connection", (ws) => {
         }
       }
       if (
-        data.type === "submitTask" &&
-        data.uid &&
-        data.taskId &&
-        data.originalText &&
-        data.refinedText
-      ) {
-     
-          try {
+  data.type === "submitTask" &&
+  data.uid &&
+  data.taskId &&
+  data.originalText &&
+  data.refinedText
+) {
+  try {
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {
@@ -397,11 +396,11 @@ wss.on("connection", (ws) => {
             {
               role: "user",
               content: `
-                  Is this sentence grammatically correct?
+Is this sentence grammatically correct?
 
-                  "Pls read the instruction carefully before submitting the task. Many users rush that could be avoided with more patience."
+"Pls read the instruction carefully before submitting the task. Many users rush that could be avoided with more patience."
 
-                  Respond ONLY with "yes" or "no".
+Respond ONLY with "yes" or "no".
               `,
             },
           ],
@@ -410,43 +409,47 @@ wss.on("connection", (ws) => {
     );
 
     const result = await response.json();
-    console.log(result)
 
-        clearInterval(intervalId);
-        activeTaskTimers.delete(key);
+    // 🛑 STOP TIMER HERE
+    const key = `${userId}_${taskId}`;
 
-        await firestore
-          .collection("Users")
-          .doc(userId)
-          .collection("assignedTasks")
-          .doc(taskId)
-          .update({ status: "Timed-out" });
+    if (activeTaskTimers.has(key)) {
+      const timer = activeTaskTimers.get(key);
+      clearInterval(timer.intervalId);
+      activeTaskTimers.delete(key);
+    }
 
-        sockets.forEach((s) => {
-          try {
-            s.send(
-              JSON.stringify({
-                type: "taskComplete",
-                taskId,
-                payOut: 7,
-                type:"taskComplete",
-                completeMethod:"Complete",
-                taskResp:result.choices[0].message.content.toLowerCase()
-              }),
-            );
-          } catch (err){
-            console.log(err)
-          }
-        
-        })
+    await firestore
+      .collection("Users")
+      .doc(userId)
+      .collection("assignedTasks")
+      .doc(taskId)
+      .update({ status: "Completed" });
 
+    const aiReply =
+      result?.choices?.[0]?.message?.content?.toLowerCase() || "error";
 
+    // Notify all sockets tied to this task
+    if (timer?.sockets) {
+      timer.sockets.forEach((s) => {
+        s.send(
+          JSON.stringify({
+            type: "taskComplete",
+            taskId,
+            payOut: 7,
+            completeMethod: "Complete",
+            taskResp: aiReply,
+          })
+        );
+      });
+    }
 
   } catch (error) {
     console.error("Error checking grammar:", error);
-    return false;
   }
-      }       
+}
+
+         
     } catch (err) {
       console.error("Invalid message", err);
     }
