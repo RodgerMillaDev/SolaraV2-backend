@@ -417,9 +417,8 @@ Respond ONLY with "yes" or "no".
       const timer = activeTaskTimers.get(key);
       clearInterval(timer.intervalId);
       activeTaskTimers.delete(key);
-    }
 
-    await firestore
+       await firestore
       .collection("Users")
       .doc(data.uid)
       .collection("assignedTasks")
@@ -444,6 +443,9 @@ Respond ONLY with "yes" or "no".
       });
     }
 
+    }
+
+   
   } catch (error) {
     console.error("Error checking grammar:", error);
   }
