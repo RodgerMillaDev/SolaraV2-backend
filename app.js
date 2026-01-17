@@ -50,13 +50,15 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
       const remaining = duration - elapsed;
 
       // Broadcast to all sockets
-      sockets.forEach(s => {
+      sockets.forEach((s) => {
         try {
-          s.send(JSON.stringify({
-            type: "timerUpdate",
-            taskId,
-            remainingTime: remaining,
-          }));
+          s.send(
+            JSON.stringify({
+              type: "timerUpdate",
+              taskId,
+              remainingTime: remaining,
+            }),
+          );
         } catch (err) {
           console.error("Socket send error:", err);
         }
@@ -74,9 +76,16 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
           .doc(taskId)
           .update({ status: "Timed-out" });
 
-        sockets.forEach(s => {
+        sockets.forEach((s) => {
           try {
-            s.send(JSON.stringify({ type: "taskComplete", taskId , completeMethod:"Timed-out",payOut:0}));
+            s.send(
+              JSON.stringify({
+                type: "taskComplete",
+                taskId,
+                completeMethod: "Timed-out",
+                payOut: 0,
+              }),
+            );
           } catch {}
         });
       }
@@ -88,83 +97,88 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
   activeTaskTimers.set(key, { intervalId, sockets, duration, startedAt });
 };
 
-
 wss.on("connection", (ws) => {
-  console.log("New connection");
 
   // Expect client to send uid immediately
   ws.on("message", async (msg) => {
     try {
       const data = JSON.parse(msg);
-if (data.type === "init" && data.uid) {
-  ws.uid = data.uid;
-  ws.taskId = data.taskId || null;
+      console.log(data)
+      if (data.type === "init" && data.uid) {
+        ws.uid = data.uid;
+        ws.taskId = data.taskId || null;
 
-  // Register socket globally
-  if (!userConnections.has(ws.uid)) userConnections.set(ws.uid, new Set());
-  userConnections.get(ws.uid).add(ws);
+        // Register socket globally
+        if (!userConnections.has(ws.uid))
+          userConnections.set(ws.uid, new Set());
+        userConnections.get(ws.uid).add(ws);
 
-  console.log(
-    `User ${ws.uid} connected, devices: ${userConnections.get(ws.uid).size}`
-  );
+        console.log(
+          `User ${ws.uid} connected, devices: ${userConnections.get(ws.uid).size}`,
+        );
 
-  // ---------- 🔁 RESUME TASK IF PRESENT ----------
-  if (ws.taskId) {
-    try {
-      const taskRef = firestore
-        .collection("Users")
-        .doc(ws.uid)
-        .collection("assignedTasks")
-        .doc(ws.taskId);
-      const snap = await taskRef.get();
-      const task = snap.data();
-      if (!task) {
-        ws.send(JSON.stringify({
-          type: "resumeError",
-          reason: "Task not found or unauthorized"
-        }));
-        return;
+        // ---------- 🔁 RESUME TASK IF PRESENT ----------
+        if (ws.taskId) {
+          try {
+            const taskRef = firestore
+              .collection("Users")
+              .doc(ws.uid)
+              .collection("assignedTasks")
+              .doc(ws.taskId);
+            const snap = await taskRef.get();
+            const task = snap.data();
+            if (!task) {
+              ws.send(
+                JSON.stringify({
+                  type: "resumeError",
+                  reason: "Task not found or unauthorized",
+                }),
+              );
+              return;
+            }
+            if (task.status === "Complete") {
+              ws.send(JSON.stringify({ type: "taskComplete" }));
+              return;
+            }
+            const now = Date.now();
+            const elapsed = Math.floor(
+              (now - task.assignedAt.toMillis()) / 1000,
+            );
+            const remaining = Math.max(task.durationSec - elapsed, 0);
+
+            // 1️⃣ Send immediate remaining time
+            ws.send(
+              JSON.stringify({
+                type: "timerUpdate",
+                remainingTime: remaining,
+              }),
+            );
+
+            console.log(
+              `Resumed task ${ws.taskId} for user ${ws.uid}, remaining ${remaining}s`,
+            );
+
+            // 2️⃣ Attach socket to active timer OR start new one
+            const key = `${ws.uid}_${ws.taskId}`;
+            if (activeTaskTimers.has(key)) {
+              activeTaskTimers.get(key).sockets.add(ws);
+            } else {
+              startTaskTimer({
+                ws,
+                userId: ws.uid,
+                taskId: ws.taskId,
+                duration: task.durationSec,
+                startedAt: task.assignedAt.toMillis(),
+              });
+            }
+          } catch (err) {
+            console.error("Resume failed:", err);
+            ws.send(
+              JSON.stringify({ type: "resumeError", reason: err.message }),
+            );
+          }
+        }
       }
-      if (task.status === "Complete") {
-        ws.send(JSON.stringify({ type: "taskComplete" }));
-        return;
-      }
-      const now = Date.now();
-      const elapsed = Math.floor((now - task.assignedAt.toMillis()) / 1000);
-      const remaining = Math.max(task.durationSec - elapsed, 0);
-
-      // 1️⃣ Send immediate remaining time
-      ws.send(JSON.stringify({
-        type: "timerUpdate",
-        remainingTime: remaining
-      }));
-
-      console.log(
-        `Resumed task ${ws.taskId} for user ${ws.uid}, remaining ${remaining}s`
-      );
-
-      // 2️⃣ Attach socket to active timer OR start new one
-      const key = `${ws.uid}_${ws.taskId}`;
-      if (activeTaskTimers.has(key)) {
-        activeTaskTimers.get(key).sockets.add(ws);
-      } else {
-        startTaskTimer({
-          ws,
-          userId: ws.uid,
-          taskId: ws.taskId,
-          duration: task.durationSec,
-          startedAt: task.assignedAt.toMillis(),
-        });
-      }
-
-    } catch (err) {
-      console.error("Resume failed:", err);
-      ws.send(JSON.stringify({ type: "resumeError", reason: err.message }));
-    }
-  }
-}
-
-
       if (data.type === "requestTask" && data.uid) {
         const userRef = firestore.collection("Users").doc(data.uid);
         const userSnap = await userRef.get();
@@ -176,7 +190,7 @@ if (data.type === "init" && data.uid) {
               type: "taskResponse",
               status: "Error",
               reason: "An error occured. Try again later.",
-            })
+            }),
           );
           return;
         }
@@ -190,7 +204,7 @@ if (data.type === "init" && data.uid) {
               type: "taskResponse",
               status: "Not Eligible",
               reason: "You are not eligible for tasks at the moment.",
-            })
+            }),
           );
           return;
         }
@@ -202,7 +216,7 @@ if (data.type === "init" && data.uid) {
               type: "taskResponse",
               status: "Limit Reached",
               reason: "Sorry, you've reached your daily task limit!",
-            })
+            }),
           );
           return;
         }
@@ -214,7 +228,7 @@ if (data.type === "init" && data.uid) {
               type: "taskResponse",
               status: "Denied",
               reason: "You have already been assigned an AI task.",
-            })
+            }),
           );
           return;
         }
@@ -232,7 +246,7 @@ if (data.type === "init" && data.uid) {
               type: "taskResponse",
               status: "No Tasks Available",
               reason: "Sorry, we have no tasks at the moment. Try again later.",
-            })
+            }),
           );
           return;
         }
@@ -249,7 +263,7 @@ if (data.type === "init" && data.uid) {
           // update user once
           tx.update(userRef, {
             dailyTaskTaken: admin.firestore.FieldValue.increment(
-              tasksToAssign.length
+              tasksToAssign.length,
             ),
           });
 
@@ -346,7 +360,7 @@ if (data.type === "init" && data.uid) {
             JSON.stringify({
               type: "startTaskResponse",
               msg: "You are ready to begin",
-            })
+            }),
           );
         } catch (error) {
           console.error("Task launch failed:", error);
@@ -355,25 +369,32 @@ if (data.type === "init" && data.uid) {
             JSON.stringify({
               type: "startTaskError",
               msg: "Sorry, an error occurred when starting the task",
-            })
+            }),
           );
         }
       }
-      if(data.type === "submitTask" && data.userId && data.taskId && data.originalText && data.refinedText){
-
-                try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAIKEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: "deepseek/deepseek-chat-v3-0324:free",
-        messages: [
-          {
-            role: 'user',
-            content: `Is the following text 
+      if (
+        data.type === "submitTask" &&
+        data.uid &&
+        data.taskId &&
+        data.originalText &&
+        data.refinedText
+      ) {
+        try {
+          const response = await fetch(
+            "https://openrouter.ai/api/v1/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${process.env.OPENAIKEY}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "deepseek/deepseek-chat-v3-0324:free",
+                messages: [
+                  {
+                    role: "user",
+                    content: `Is the following text 
 
                         "${data.originaltext}" 
 
@@ -383,22 +404,23 @@ if (data.type === "init" && data.uid) {
 
                       Respond ONLY with "yes" or "no".
                
-                      `
-          },
-        ],
-      }),
-    });
+                      `,
+                  },
+                ],
+              }),
+            },
+          );
 
-    const result = await response.json();
-    console.log(result)
-    return result.choices[0].message.content.toLowerCase().includes("yes");
-  } catch (error) {
-    console.error('Error checking topic match:', error.message || error);
-    return false; // fail-safe
-  }
-
-      }
-      else {
+          const result = await response.json();
+          console.log(result);
+          return result.choices[0].message.content
+            .toLowerCase()
+            .includes("yes");
+        } catch (error) {
+          console.error("Error checking topic match:", error.message || error);
+          return false; // fail-safe
+        }
+      } else {
         console.log("invalid request received");
         console.log(data);
       }
