@@ -116,10 +116,8 @@ if (data.type === "init" && data.uid) {
         .doc(ws.uid)
         .collection("assignedTasks")
         .doc(ws.taskId);
-
       const snap = await taskRef.get();
       const task = snap.data();
-
       if (!task) {
         ws.send(JSON.stringify({
           type: "resumeError",
@@ -127,12 +125,10 @@ if (data.type === "init" && data.uid) {
         }));
         return;
       }
-
       if (task.status === "Complete") {
         ws.send(JSON.stringify({ type: "taskComplete" }));
         return;
       }
-
       const now = Date.now();
       const elapsed = Math.floor((now - task.assignedAt.toMillis()) / 1000);
       const remaining = Math.max(task.durationSec - elapsed, 0);
@@ -362,7 +358,47 @@ if (data.type === "init" && data.uid) {
             })
           );
         }
-      }else {
+      }
+      if(data.type === "submitTask" && data.userId && data.taskId && data.originaltext && data.refinedText){
+
+                try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAIKEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: "deepseek/deepseek-chat-v3-0324:free",
+        messages: [
+          {
+            role: 'user',
+            content: `Is the following text 
+
+                        "${data.originaltext}" 
+
+                        grammartically corrected with 
+
+                        "${data.refinedText}"
+
+                      Respond ONLY with "yes" or "no".
+               
+                      `
+          },
+        ],
+      }),
+    });
+
+    const result = await response.json();
+    console.log(result)
+    return result.choices[0].message.content.toLowerCase().includes("yes");
+  } catch (error) {
+    console.error('Error checking topic match:', error.message || error);
+    return false; // fail-safe
+  }
+
+      }
+      else {
         console.log("invalid request received");
         console.log(data);
       }
