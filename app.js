@@ -86,7 +86,9 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
                 payOut: 0,
               }),
             );
-          } catch {}
+          } catch (err){
+            console.log(err)
+          }
         });
       }
     } catch (err) {
@@ -409,12 +411,36 @@ wss.on("connection", (ws) => {
 
     const result = await response.json();
     console.log(result.choices[0].message.content.toLowerCase())
-    ws.send({
-      type:"taskComplete",
-      pay:0,
-      result:result.choices[0].message.content.toLowerCase()
 
-    })
+        clearInterval(intervalId);
+        activeTaskTimers.delete(key);
+
+        await firestore
+          .collection("Users")
+          .doc(userId)
+          .collection("assignedTasks")
+          .doc(taskId)
+          .update({ status: "Timed-out" });
+
+        sockets.forEach((s) => {
+          try {
+            s.send(
+              JSON.stringify({
+                type: "taskComplete",
+                taskId,
+                payOut: 7,
+                type:"taskComplete",
+                completeMethod:"Complete",
+                taskResp:result.choices[0].message.content.toLowerCase()
+              }),
+            );
+          } catch (err){
+            console.log(err)
+          }
+        
+        })
+
+
 
   } catch (error) {
     console.error("Error checking grammar:", error);
