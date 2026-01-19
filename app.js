@@ -211,7 +211,7 @@ wss.on("connection", (ws) => {
         }
 
         // ❌ Daily limit reached
-        if (user.dailyTaskTaken >= 20) {
+        if (user.dailyTaskTaken >= 30) {
           ws.send(
             JSON.stringify({
               type: "taskResponse",
@@ -502,6 +502,68 @@ if (activeTaskTimers.has(key)) {
     console.error("Error checking grammar:", error);
   }
 }
+
+if (
+  data.type === "cancelTask" &&
+  data.uid &&
+  data.taskId
+) {
+  try {
+    const key = `${data.uid}_${data.taskId}`;
+
+    // ⏱️ Stop & clear timer if it exists
+    if (activeTaskTimers.has(key)) {
+      const timer = activeTaskTimers.get(key);
+      clearInterval(timer.intervalId);
+      activeTaskTimers.delete(key);
+
+      // 🔔 Notify all sockets tied to this task
+      if (timer.sockets) {
+        timer.sockets.forEach((s) => {
+          try {
+            s.send(
+              JSON.stringify({
+                type: "taskCanceled",
+                taskId: data.taskId,
+                reason: "User canceled task",
+              })
+            );
+          } catch (err) {
+            console.error("Socket notify failed:", err);
+          }
+        });
+      }
+    }
+
+    // 🔥 Update Firestore
+    const taskRef = firestore
+      .collection("Users")
+      .doc(data.uid)
+      .collection("assignedTasks")
+      .doc(data.taskId);
+
+    await taskRef.update({
+      status: "Canceled",
+      canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+      rewarded: false,
+    });
+
+    console.log(
+      `Task ${data.taskId} canceled by user ${data.uid}`
+    );
+
+  } catch (err) {
+    console.error("Cancel task failed:", err);
+
+    ws.send(
+      JSON.stringify({
+        type: "cancelTaskError",
+        msg: "Failed to cancel task. Try again.",
+      })
+    );
+  }
+}
+
 
          
     } catch (err) {
