@@ -396,9 +396,14 @@ wss.on("connection", (ws) => {
             {
               role: "user",
               content: `
-Is this sentence grammatically correct?
+Check if the corrected statement is grammatically correct compared to the original.
 
-"Pls read the instruction carefully before submitting the task. Many users rush that could be avoided with more patience."
+Original statement:
+"${data.originalText}"
+
+Corrected statement:
+"${data.refinedText}"
+
 
 Respond ONLY with "yes" or "no".
               `,
@@ -415,7 +420,6 @@ Respond ONLY with "yes" or "no".
 if (activeTaskTimers.has(key)) {
   const timer = activeTaskTimers.get(key);
 
-  // stop timer
   clearInterval(timer.intervalId);
   activeTaskTimers.delete(key);
 
@@ -424,53 +428,75 @@ if (activeTaskTimers.has(key)) {
     .collection("assignedTasks")
     .doc(data.taskId);
 
-  let cash = 0;
+  // 👇 AI score (percentage)
+  const taskResp = parseFloat(
+    result?.choices?.[0]?.message?.content?.trim()
+  );
 
-  // 🔒 Atomic operation (VERY important for money)
+  if (isNaN(taskResp)) {
+    throw new Error("Invalid AI response score");
+  }
+
+  let cash = 0;
+  let rewarded = false;
+
   await firestore.runTransaction(async (transaction) => {
     const taskSnap = await transaction.get(taskRef);
     const userSnap = await transaction.get(userRef);
 
-    if (!taskSnap.exists || !userSnap.exists) {
-      throw new Error("Task or user not found");
-    }
+    if (!taskSnap.exists || !userSnap.exists) return;
 
     const taskData = taskSnap.data();
 
-    // Prevent double payout
+    // Prevent double processing
     if (taskData.status === "Completed") return;
 
-    cash = parseInt(taskData.pay) || 0;
-    const currentBalance = userSnap.data().accountBalance || 0;
-
+    // Always store score
     transaction.update(taskRef, {
-      status: "Completed",
-      completedAt: Date.now(),
+      aiScore: taskResp,
+      reviewedAt: Date.now(),
     });
 
-    transaction.update(userRef, {
-      accountBalance: currentBalance + cash,
-    });
+    // ✅ Reward only if score >= 92
+    if (taskResp >= 92) {
+      cash = parseInt(taskData.pay) || 0;
+      const currentBalance = userSnap.data().accountBalance || 0;
+
+      transaction.update(taskRef, {
+        status: "Completed",
+        rewarded: true,
+      });
+
+      transaction.update(userRef, {
+        accountBalance: currentBalance + cash,
+      });
+
+      rewarded = true;
+    } else {
+      transaction.update(taskRef, {
+        status: "Rejected",
+        rewarded: false,
+      });
+    }
   });
 
-  const aiReply =
-    result?.choices?.[0]?.message?.content?.toLowerCase() || "error";
-
-  // 🔔 Notify all sockets AFTER transaction succeeds
+  // 🔔 Notify client
   if (timer?.sockets) {
     timer.sockets.forEach((s) => {
       s.send(
         JSON.stringify({
           type: "taskComplete",
           taskId: data.taskId,
-          payOut: cash,
+          payOut: rewarded ? cash : 0,
+          rewarded,
+          aiScore: taskResp,
           completeMethod: "Complete",
-          taskResp: aiReply,
         })
       );
     });
   }
 }
+
 
   } catch (error) {
     console.error("Error checking grammar:", error);
