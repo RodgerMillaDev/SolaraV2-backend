@@ -412,40 +412,66 @@ Respond ONLY with "yes" or "no".
 
     // 🛑 STOP TIMER HERE
     const key = `${data.uid}_${data.taskId}`;
+if (activeTaskTimers.has(key)) {
+  const timer = activeTaskTimers.get(key);
 
-    if (activeTaskTimers.has(key)) {
-      const timer = activeTaskTimers.get(key);
-      clearInterval(timer.intervalId);
-      activeTaskTimers.delete(key);
+  // stop timer
+  clearInterval(timer.intervalId);
+  activeTaskTimers.delete(key);
 
-       await firestore
-      .collection("Users")
-      .doc(data.uid)
-      .collection("assignedTasks")
-      .doc(data.taskId)
-      .update({ status: "Completed" });
+  const userRef = firestore.collection("Users").doc(data.uid);
+  const taskRef = userRef
+    .collection("assignedTasks")
+    .doc(data.taskId);
 
-    const aiReply =
-      result?.choices?.[0]?.message?.content?.toLowerCase() || "error";
+  let cash = 0;
 
-    // Notify all sockets tied to this task
-    if (timer?.sockets) {
-      timer.sockets.forEach((s) => {
-        s.send(
-          JSON.stringify({
-            type: "taskComplete",
-            taskId:data.taskId,
-            payOut: 7,
-            completeMethod: "Complete",
-            taskResp: aiReply,
-          })
-        );
-      });
+  // 🔒 Atomic operation (VERY important for money)
+  await firestore.runTransaction(async (transaction) => {
+    const taskSnap = await transaction.get(taskRef);
+    const userSnap = await transaction.get(userRef);
+
+    if (!taskSnap.exists || !userSnap.exists) {
+      throw new Error("Task or user not found");
     }
 
-    }
+    const taskData = taskSnap.data();
 
-   
+    // Prevent double payout
+    if (taskData.status === "Completed") return;
+
+    cash = parseInt(taskData.pay) || 0;
+    const currentBalance = userSnap.data().accountBalance || 0;
+
+    transaction.update(taskRef, {
+      status: "Completed",
+      completedAt: Date.now(),
+    });
+
+    transaction.update(userRef, {
+      accountBalance: currentBalance + cash,
+    });
+  });
+
+  const aiReply =
+    result?.choices?.[0]?.message?.content?.toLowerCase() || "error";
+
+  // 🔔 Notify all sockets AFTER transaction succeeds
+  if (timer?.sockets) {
+    timer.sockets.forEach((s) => {
+      s.send(
+        JSON.stringify({
+          type: "taskComplete",
+          taskId: data.taskId,
+          payOut: cash,
+          completeMethod: "Complete",
+          taskResp: aiReply,
+        })
+      );
+    });
+  }
+}
+
   } catch (error) {
     console.error("Error checking grammar:", error);
   }
