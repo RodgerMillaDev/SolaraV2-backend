@@ -391,7 +391,7 @@ wss.on("connection", (ws) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "arcee-ai/trinity-mini:free",
+          model: "deepseek/deepseek-r1-0528:free",
           messages: [
             {
               role: "user",
@@ -644,3 +644,5 @@ server.listen(port, () => {
 });
 
 // timer function
+
+
