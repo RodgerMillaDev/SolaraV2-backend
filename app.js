@@ -429,9 +429,8 @@ if (activeTaskTimers.has(key)) {
     .doc(data.taskId);
 
   // 👇 AI score (percentage)
-  const taskResp = parseFloat(
-    result?.choices?.[0]?.message?.content?.trim()
-  );
+  const taskResp =  result?.choices?.[0]?.message?.content?.trim()
+
   console.log(taskResp)
 
   if (isNaN(taskResp)) {
