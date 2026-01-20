@@ -432,6 +432,7 @@ if (activeTaskTimers.has(key)) {
   const taskResp = parseFloat(
     result?.choices?.[0]?.message?.content?.trim()
   );
+  console.log(taskResp)
 
   if (isNaN(taskResp)) {
     throw new Error("Invalid AI response score");
