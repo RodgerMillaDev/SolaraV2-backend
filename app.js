@@ -396,7 +396,7 @@ wss.on("connection", (ws) => {
             {
               role: "user",
               content: `
-Check if the corrected statement is grammatically correct compared to the original.
+Check if the corrected statement is grammatically correct compared to the original and rate it on a scale of  0 t0 100
 
 Original statement:
 "${data.originalText}"
@@ -405,8 +405,8 @@ Corrected statement:
 "${data.refinedText}"
 
 
-Respond ONLY with "yes" or "no".
-              `,
+Respond with ONLY a number between 0 and 100.
+No symbols, no words.              `,
             },
           ],
         }),
