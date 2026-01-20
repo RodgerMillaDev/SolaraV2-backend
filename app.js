@@ -414,6 +414,7 @@ Respond ONLY with "yes" or "no".
     );
 
     const result = await response.json();
+    console.log(result)
 
     // 🛑 STOP TIMER HERE
     const key = `${data.uid}_${data.taskId}`;
