@@ -475,7 +475,7 @@ if (activeTaskTimers.has(key)) {
       rewarded = true;
     } else {
       transaction.update(taskRef, {
-        status: "Rejected",
+        status: "Failed",
         rewarded: false,
       });
     }
