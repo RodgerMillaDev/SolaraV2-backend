@@ -400,6 +400,18 @@ userConnections.set(ws.uid, new Set([ws]));
   data.refinedText
 ) {
   try {
+
+        // 🛑 STOP TIMER HERE
+    const key = `${data.uid}_${data.taskId}`;
+if (activeTaskTimers.has(key)) {
+  const timer = activeTaskTimers.get(key);
+
+  clearInterval(timer.intervalId);
+  activeTaskTimers.delete(key);
+}
+
+    
+
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {
@@ -434,13 +446,6 @@ No symbols, no words.              `,
     const result = await response.json();
     console.log(result)
 
-    // 🛑 STOP TIMER HERE
-    const key = `${data.uid}_${data.taskId}`;
-if (activeTaskTimers.has(key)) {
-  const timer = activeTaskTimers.get(key);
-
-  clearInterval(timer.intervalId);
-  activeTaskTimers.delete(key);
 
   const userRef = firestore.collection("Users").doc(data.uid);
   const taskRef = userRef
@@ -514,7 +519,7 @@ if (activeTaskTimers.has(key)) {
       );
     });
   }
-}
+
 
 
   } catch (error) {
