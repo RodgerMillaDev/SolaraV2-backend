@@ -392,6 +392,12 @@ userConnections.set(ws.uid, new Set([ws]));
           );
         }
       }
+
+
+      const key = `${data.uid}_${data.taskId}`;
+let timer = null;
+
+
       if (
   data.type === "submitTask" &&
   data.uid &&
@@ -402,7 +408,6 @@ userConnections.set(ws.uid, new Set([ws]));
   try {
 
         // 🛑 STOP TIMER HERE
-    const key = `${data.uid}_${data.taskId}`;
 if (activeTaskTimers.has(key)) {
   const timer = activeTaskTimers.get(key);
 
