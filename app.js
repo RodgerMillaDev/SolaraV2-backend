@@ -109,10 +109,28 @@ wss.on("connection", (ws) => {
         ws.uid = data.uid;
         ws.taskId = data.taskId || null;
 
-        // Register socket globally
-        if (!userConnections.has(ws.uid))
-          userConnections.set(ws.uid, new Set());
-        userConnections.get(ws.uid).add(ws);
+// 🚫 SINGLE DEVICE ENFORCEMENT
+if (userConnections.has(ws.uid)) {
+  const existingSockets = userConnections.get(ws.uid);
+
+  existingSockets.forEach((oldWs) => {
+    try {
+      oldWs.send(
+        JSON.stringify({
+          type: "forceLogout",
+          reason: "You logged in from another device",
+        })
+      );
+      oldWs.close();
+    } catch (e) {}
+  });
+
+  userConnections.delete(ws.uid);
+}
+
+// Register new socket
+userConnections.set(ws.uid, new Set([ws]));
+
 
         console.log(
           `User ${ws.uid} connected, devices: ${userConnections.get(ws.uid).size}`,
