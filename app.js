@@ -446,7 +446,13 @@ No symbols, no words.              `,
     const taskResp = result?.choices?.[0]?.message?.content?.trim();
 
     if (isNaN(taskResp)) {
+       JSON.stringify({
+            type: "taskCompleteError",
+            msg:"An error occured from the server!"
+           
+          })
       throw new Error("Invalid AI response score");
+         
     }
 
     const userRef = firestore.collection("Users").doc(data.uid);
