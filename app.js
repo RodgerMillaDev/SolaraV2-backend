@@ -390,7 +390,6 @@ userConnections.set(ws.uid, new Set([ws]));
 
 
       const key = `${data.uid}_${data.taskId}`;
-let timer = null;
 if (
   data.type === "submitTask" &&
   data.uid &&
@@ -401,14 +400,14 @@ if (
   let timer;
 
   try {
-    // ✅ FIX 1: timer scope
+    // ---- STOP TIMER SAFELY ----
     if (activeTaskTimers.has(key)) {
       timer = activeTaskTimers.get(key);
       clearInterval(timer.intervalId);
       activeTaskTimers.delete(key);
     }
 
-    // ✅ AI REQUEST
+    // ---- CALL AI ----
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {
@@ -423,40 +422,50 @@ if (
             {
               role: "user",
               content: `
-Respond with a single integer between 0 and 100.
-Do not explain.
+Check if the corrected statement is grammatically correct compared to the original and rate it on a scale of 0 to 100.
 
 Original statement:
-${data.originalText}
+"${data.originalText}"
 
 Corrected statement:
-${data.refinedText}
-              `.trim(),
+"${data.refinedText}"
+
+Respond with ONLY a number between 0 and 100.
+              `,
             },
           ],
         }),
       }
     );
 
-    // ✅ FIX 2: catch OpenRouter failures
+    // ---- HANDLE HTTP ERRORS ----
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("OpenRouter error:", errorText);
-      throw new Error("OpenRouter request failed");
+      console.error("AI HTTP error:", response.status, errorText);
+      throw new Error("AI service unavailable");
     }
 
     const result = await response.json();
     console.log("AI raw response:", result);
 
-    const rawScore = result?.choices?.[0]?.message?.content?.trim();
-
-    // ✅ FIX 3: strict numeric parsing
-    const score = Number(rawScore);
-
-    if (!Number.isFinite(score)) {
-      throw new Error(`Invalid AI score received: "${rawScore}"`);
+    // ---- HANDLE AI ERRORS ----
+    if (result.error) {
+      console.error("AI provider error:", result.error);
+      throw new Error(result.error.message || "AI provider failed");
     }
 
+    const taskRespRaw = result?.choices?.[0]?.message?.content;
+    if (!taskRespRaw) {
+      throw new Error("Empty AI response");
+    }
+
+    const taskResp = Number(taskRespRaw.trim());
+
+    if (Number.isNaN(taskResp) || taskResp < 0 || taskResp > 100) {
+      throw new Error(`Invalid AI score received: "${taskRespRaw}"`);
+    }
+
+    // ---- FIRESTORE ----
     const userRef = firestore.collection("Users").doc(data.uid);
     const taskRef = userRef.collection("assignedTasks").doc(data.taskId);
 
@@ -464,7 +473,6 @@ ${data.refinedText}
     let rewarded = false;
     let status = "Failed";
 
-    // ✅ TRANSACTION
     await firestore.runTransaction(async (transaction) => {
       const taskSnap = await transaction.get(taskRef);
       const userSnap = await transaction.get(userRef);
@@ -472,21 +480,20 @@ ${data.refinedText}
       if (!taskSnap.exists || !userSnap.exists) return;
 
       const taskData = taskSnap.data();
-
       if (taskData.status === "Completed") return;
 
-      if (score >= 92) {
-        cash = parseInt(taskData.pay, 10) || 0;
+      if (taskResp >= 92) {
+        cash = parseInt(taskData.pay) || 0;
         rewarded = true;
         status = "Completed";
 
         const currentBalance = userSnap.data().accountBalance || 0;
 
         transaction.update(taskRef, {
-          aiScore: score,
+          aiScore: taskResp,
           reviewedAt: Date.now(),
-          status: "Completed",
-          rewarded: true,
+          status,
+          rewarded,
         });
 
         transaction.update(userRef, {
@@ -494,15 +501,15 @@ ${data.refinedText}
         });
       } else {
         transaction.update(taskRef, {
-          aiScore: score,
+          aiScore: taskResp,
           reviewedAt: Date.now(),
-          status: "Failed",
-          rewarded: false,
+          status,
+          rewarded,
         });
       }
     });
 
-    // ✅ SOCKET SUCCESS RESPONSE
+    // ---- SOCKET RESPONSE ----
     if (timer?.sockets?.length) {
       timer.sockets.forEach((s) => {
         s.send(
@@ -511,21 +518,21 @@ ${data.refinedText}
             taskId: data.taskId,
             payOut: cash,
             rewarded,
-            aiScore: score,
+            aiScore: taskResp,
             status,
           })
         );
       });
     }
+
   } catch (error) {
-    // ✅ FIX 4: guaranteed error visibility
-    console.error("Error checking grammar:", error);
+    console.error("Error checking grammar:", error.message);
 
     if (timer?.sockets?.length) {
       timer.sockets.forEach((s) => {
         s.send(
           JSON.stringify({
-            type: "taskError",
+            type: "taskSubmitError",
             taskId: data.taskId,
             error: error.message || "Processing failed",
           })
@@ -534,6 +541,7 @@ ${data.refinedText}
     }
   }
 }
+
 
 if (
   data.type === "cancelTask" &&
