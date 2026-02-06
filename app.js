@@ -389,7 +389,6 @@ userConnections.set(ws.uid, new Set([ws]));
       }
 
 
-      const key = `${data.uid}_${data.taskId}`;
 if (
   data.type === "submitTask" &&
   data.uid &&
@@ -401,7 +400,7 @@ if (
   let timer;
 
   try {
-    // Stop task timer if running
+    // Stop active timer if exists
     if (activeTaskTimers.has(key)) {
       timer = activeTaskTimers.get(key);
       clearInterval(timer.intervalId);
@@ -424,42 +423,48 @@ if (
               role: "user",
               content: `
 Rate the grammatical correctness of the corrected statement compared to the original.
-Score from 0 to 100.
 
-Original:
+Return ONLY a JSON object like this:
+{
+  "score": <number between 0 and 100>
+}
+
+Original statement:
 "${data.originalText}"
 
-Corrected:
+Corrected statement:
 "${data.refinedText}"
-
-The response MUST include a number between 0 and 100.
-`,
+              `,
             },
           ],
         }),
       }
     );
 
+    // ================= PARSE AI RESPONSE =================
     const result = await response.json();
     console.log("AI raw response:", result);
 
     const rawContent = result?.choices?.[0]?.message?.content || "";
     console.log("AI raw content:", rawContent);
 
-    // ================= SCORE EXTRACTION =================
-    const match = rawContent.match(/\b\d{1,3}\b/);
+    // Extract JSON from AI response
+    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON returned from AI");
 
-    if (!match) {
-      throw new Error(`Invalid AI score received: "${rawContent}"`);
+    let aiScore;
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      aiScore = Number(parsed.score);
+    } catch (e) {
+      throw new Error("Failed to parse JSON from AI response");
     }
 
-    const aiScore = Number(match[0]);
-
-    if (aiScore < 0 || aiScore > 100) {
+    if (isNaN(aiScore) || aiScore < 0 || aiScore > 100) {
       throw new Error(`AI score out of range: ${aiScore}`);
     }
 
-    // ================= FIRESTORE =================
+    // ================= FIRESTORE TRANSACTION =================
     const userRef = firestore.collection("Users").doc(data.uid);
     const taskRef = userRef.collection("assignedTasks").doc(data.taskId);
 
@@ -477,7 +482,7 @@ The response MUST include a number between 0 and 100.
       if (taskData.status === "Completed") return;
 
       if (aiScore >= 92) {
-        cash = parseInt(taskData.pay) || 0;
+        cash = parseInt(taskData.pay, 10) || 0;
         rewarded = true;
         status = "Completed";
 
@@ -497,14 +502,14 @@ The response MUST include a number between 0 and 100.
         transaction.update(taskRef, {
           aiScore,
           reviewedAt: Date.now(),
-          status: "Failed",
+          status,
           rewarded: false,
         });
       }
     });
 
-    // ================= CLIENT RESPONSE =================
-    if (timer?.sockets) {
+    // ================= SOCKET RESPONSE =================
+    if (timer?.sockets?.length) {
       timer.sockets.forEach((s) =>
         s.send(
           JSON.stringify({
@@ -521,13 +526,13 @@ The response MUST include a number between 0 and 100.
   } catch (error) {
     console.error("Error checking grammar:", error.message);
 
-    if (timer?.sockets) {
+    if (timer?.sockets?.length) {
       timer.sockets.forEach((s) =>
         s.send(
           JSON.stringify({
             type: "taskSubmitError",
             taskId: data.taskId,
-            error: "Task processing failed. Please try again.",
+            error: error.message || "Task processing failed",
           })
         )
       );
