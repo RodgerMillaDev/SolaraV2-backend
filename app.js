@@ -387,8 +387,6 @@ userConnections.set(ws.uid, new Set([ws]));
           );
         }
       }
-
-
 if (
   data.type === "submitTask" &&
   data.uid &&
@@ -407,21 +405,28 @@ if (
       activeTaskTimers.delete(key);
     }
 
-    // ================= AI REQUEST =================
-    const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAIKEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "deepseek/deepseek-r1-0528:free",
-          messages: [
-            {
-              role: "user",
-              content: `
+    // ================= AI REQUEST WITH RETRY =================
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    let rawContent = "";
+
+    while (attempt < MAX_RETRIES) {
+      attempt++;
+      try {
+        const response = await fetch(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${process.env.OPENAIKEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "deepseek/deepseek-r1-0528:free",
+              messages: [
+                {
+                  role: "user",
+                  content: `
 Rate the grammatical correctness of the corrected statement compared to the original.
 
 Return ONLY a JSON object like this:
@@ -429,26 +434,39 @@ Return ONLY a JSON object like this:
   "score": <number between 0 and 100>
 }
 
-Original statement:
+Original:
 "${data.originalText}"
 
-Corrected statement:
+Corrected:
 "${data.refinedText}"
-              `,
-            },
-          ],
-        }),
+                  `,
+                },
+              ],
+            }),
+          }
+        );
+
+        const result = await response.json();
+        console.log("AI raw response attempt", attempt, result);
+
+        if (result.error || !result.choices) {
+          throw new Error(result.error?.message || "Invalid AI response");
+        }
+
+        rawContent = result.choices[0]?.message?.content || "";
+        if (!rawContent) throw new Error("Empty AI content");
+
+        // Successfully got content → break retry loop
+        break;
+      } catch (err) {
+        console.warn(`AI request attempt ${attempt} failed: ${err.message}`);
+        if (attempt >= MAX_RETRIES) throw err;
+        // optional: wait a short delay before retrying
+        await new Promise((res) => setTimeout(res, 1000));
       }
-    );
+    }
 
-    // ================= PARSE AI RESPONSE =================
-    const result = await response.json();
-    console.log("AI raw response:", result);
-
-    const rawContent = result?.choices?.[0]?.message?.content || "";
-    console.log("AI raw content:", rawContent);
-
-    // Extract JSON from AI response
+    // ================= PARSE AI JSON =================
     const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON returned from AI");
 
@@ -530,7 +548,7 @@ Corrected statement:
       timer.sockets.forEach((s) =>
         s.send(
           JSON.stringify({
-            type: "taskSubmitError",
+            type: "taskError",
             taskId: data.taskId,
             error: error.message || "Task processing failed",
           })
