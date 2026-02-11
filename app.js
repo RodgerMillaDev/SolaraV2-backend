@@ -387,6 +387,8 @@ userConnections.set(ws.uid, new Set([ws]));
           );
         }
       }
+const LanguageToolApi = require("languagetool-api"); 
+
 if (
   data.type === "submitTask" &&
   data.uid &&
@@ -398,72 +400,25 @@ if (
   let timer;
 
   try {
-    // 1️⃣ Get timer WITHOUT deleting it
+    // 1️⃣ Stop the timer (but keep sockets)
     if (activeTaskTimers.has(key)) {
       timer = activeTaskTimers.get(key);
-      clearInterval(timer.intervalId); // stop countdown only
+      clearInterval(timer.intervalId); // stop countdown
     }
 
-    // ================= AI REQUEST WITH RETRY =================
-    const MAX_RETRIES = 3;
-    let attempt = 0;
-    let rawContent = "";
+    // ================= GRAMMAR CHECK =================
+    const [originalErrors, refinedErrors] = await Promise.all([
+      LanguageToolApi.check({ text: data.originalText, language: "en-US" }),
+      LanguageToolApi.check({ text: data.refinedText, language: "en-US" }),
+    ]);
 
-    while (attempt < MAX_RETRIES) {
-      attempt++;
-      try {
-        const response = await fetch(
-          "https://openrouter.ai/api/v1/chat/completions",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${process.env.OPENAIKEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "deepseek/deepseek-r1-0528:free",
-              messages: [
-                {
-                  role: "user",
-                  content: `
-Return ONLY this JSON:
-{ "score": number }
+    const originalCount = originalErrors.matches.length;
+    const refinedCount = refinedErrors.matches.length;
 
-Original:
-"${data.originalText}"
-
-Corrected:
-"${data.refinedText}"
-                  `,
-                },
-              ],
-            }),
-          }
-        );
-
-        const result = await response.json();
-        console.log("AI raw response attempt", attempt, result);
-
-        rawContent = result?.choices?.[0]?.message?.content;
-        if (!rawContent) throw new Error("Empty AI response");
-
-        break;
-      } catch (err) {
-        if (attempt >= MAX_RETRIES) throw err;
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    }
-
-    // ================= PARSE AI SCORE =================
-    const jsonMatch = rawContent.match(/\{\s*"score"\s*:\s*\d+\s*\}/);
-    if (!jsonMatch) throw new Error("Invalid AI JSON");
-
-    const { score } = JSON.parse(jsonMatch[0]);
-    const aiScore = Number(score);
-
-    if (isNaN(aiScore) || aiScore < 0 || aiScore > 100) {
-      throw new Error("AI score out of range");
-    }
+    // ================= COMPUTE SCORE =================
+    // Example: higher score if errors reduced
+    let score = 100 - refinedCount * 10 + (originalCount - refinedCount) * 5;
+    score = Math.max(0, Math.min(100, score)); // clamp 0-100
 
     // ================= FIRESTORE TRANSACTION =================
     const userRef = firestore.collection("Users").doc(data.uid);
@@ -482,13 +437,13 @@ Corrected:
       if (!taskSnap.exists || !userSnap.exists) return;
       if (taskSnap.data().status === "Completed") return;
 
-      if (aiScore >= 92) {
+      if (score >= 92) {
         cash = parseInt(taskSnap.data().pay, 10) || 0;
         rewarded = true;
         status = "Completed";
 
         tx.update(taskRef, {
-          aiScore,
+          aiScore: score, // now deterministic score
           reviewedAt: Date.now(),
           status,
           rewarded: true,
@@ -500,7 +455,7 @@ Corrected:
         });
       } else {
         tx.update(taskRef, {
-          aiScore,
+          aiScore: score,
           reviewedAt: Date.now(),
           status,
           rewarded: false,
@@ -508,7 +463,7 @@ Corrected:
       }
     });
 
-    // ================= SOCKET RESPONSE (CRITICAL FIX) =================
+    // ================= SOCKET RESPONSE =================
     if (timer?.sockets?.size) {
       timer.sockets.forEach((s) => {
         if (s.readyState === WebSocket.OPEN) {
@@ -516,25 +471,24 @@ Corrected:
             JSON.stringify({
               type: "taskComplete",
               taskId: data.taskId,
-              aiScore,
+              aiScore: score,
               payOut: cash,
               rewarded,
               status,
-              completeMethod: "AI",
+              completeMethod: "Instant",
             })
           );
         }
       });
     }
 
-    // 2️⃣ NOW safely remove timer
+    // 2️⃣ Now delete the timer safely
     activeTaskTimers.delete(key);
 
   } catch (error) {
-    console.error("Error checking grammar:", error.message);
+    console.error("Error processing task:", error.message);
 
     const timer = activeTaskTimers.get(key);
-
     if (timer?.sockets?.size) {
       timer.sockets.forEach((s) => {
         if (s.readyState === WebSocket.OPEN) {
@@ -550,7 +504,6 @@ Corrected:
     }
   }
 }
-
 
 if (
   data.type === "cancelTask" &&
