@@ -389,7 +389,6 @@ userConnections.set(ws.uid, new Set([ws]));
       }
 const LanguageToolApi = require("languagetool-api"); 
 
-const fetch = require("node-fetch"); // npm i node-fetch
 
 if (
   data.type === "submitTask" &&
