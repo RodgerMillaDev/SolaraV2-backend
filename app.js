@@ -398,10 +398,10 @@ if (
   let timer;
 
   try {
-    // Stop active timer if exists
+    // 1️⃣ Get timer WITHOUT deleting it
     if (activeTaskTimers.has(key)) {
       timer = activeTaskTimers.get(key);
-      clearInterval(timer.intervalId);
+      clearInterval(timer.intervalId); // stop countdown only
     }
 
     // ================= AI REQUEST WITH RETRY =================
@@ -426,12 +426,8 @@ if (
                 {
                   role: "user",
                   content: `
-Rate the grammatical correctness of the corrected statement compared to the original.
-
-Return ONLY a JSON object like this:
-{
-  "score": <number between 0 and 100>
-}
+Return ONLY this JSON:
+{ "score": number }
 
 Original:
 "${data.originalText}"
@@ -448,37 +444,25 @@ Corrected:
         const result = await response.json();
         console.log("AI raw response attempt", attempt, result);
 
-        if (result.error || !result.choices) {
-          throw new Error(result.error?.message || "Invalid AI response");
-        }
+        rawContent = result?.choices?.[0]?.message?.content;
+        if (!rawContent) throw new Error("Empty AI response");
 
-        rawContent = result.choices[0]?.message?.content || "";
-        if (!rawContent) throw new Error("Empty AI content");
-
-        // Successfully got content → break retry loop
         break;
       } catch (err) {
-        console.warn(`AI request attempt ${attempt} failed: ${err.message}`);
         if (attempt >= MAX_RETRIES) throw err;
-        // optional: wait a short delay before retrying
-        await new Promise((res) => setTimeout(res, 1000));
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
 
-    // ================= PARSE AI JSON =================
-    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("No JSON returned from AI");
+    // ================= PARSE AI SCORE =================
+    const jsonMatch = rawContent.match(/\{\s*"score"\s*:\s*\d+\s*\}/);
+    if (!jsonMatch) throw new Error("Invalid AI JSON");
 
-    let aiScore;
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      aiScore = Number(parsed.score);
-    } catch (e) {
-      throw new Error("Failed to parse JSON from AI response");
-    }
+    const { score } = JSON.parse(jsonMatch[0]);
+    const aiScore = Number(score);
 
     if (isNaN(aiScore) || aiScore < 0 || aiScore > 100) {
-      throw new Error(`AI score out of range: ${aiScore}`);
+      throw new Error("AI score out of range");
     }
 
     // ================= FIRESTORE TRANSACTION =================
@@ -489,34 +473,33 @@ Corrected:
     let rewarded = false;
     let status = "Failed";
 
-    await firestore.runTransaction(async (transaction) => {
-      const taskSnap = await transaction.get(taskRef);
-      const userSnap = await transaction.get(userRef);
+    await firestore.runTransaction(async (tx) => {
+      const [taskSnap, userSnap] = await Promise.all([
+        tx.get(taskRef),
+        tx.get(userRef),
+      ]);
 
       if (!taskSnap.exists || !userSnap.exists) return;
-
-      const taskData = taskSnap.data();
-      if (taskData.status === "Completed") return;
+      if (taskSnap.data().status === "Completed") return;
 
       if (aiScore >= 92) {
-        cash = parseInt(taskData.pay, 10) || 0;
+        cash = parseInt(taskSnap.data().pay, 10) || 0;
         rewarded = true;
         status = "Completed";
 
-        const currentBalance = userSnap.data().accountBalance || 0;
-
-        transaction.update(taskRef, {
+        tx.update(taskRef, {
           aiScore,
           reviewedAt: Date.now(),
           status,
           rewarded: true,
         });
 
-        transaction.update(userRef, {
-          accountBalance: currentBalance + cash,
+        tx.update(userRef, {
+          accountBalance:
+            (userSnap.data().accountBalance || 0) + cash,
         });
       } else {
-        transaction.update(taskRef, {
+        tx.update(taskRef, {
           aiScore,
           reviewedAt: Date.now(),
           status,
@@ -525,36 +508,45 @@ Corrected:
       }
     });
 
-    // ================= SOCKET RESPONSE =================
-    if (timer?.sockets?.length) {
-      timer.sockets.forEach((s) =>
-        s.send(
-          JSON.stringify({
-            type: "taskComplete",
-            taskId: data.taskId,
-            aiScore,
-            payOut: cash,
-            rewarded,
-            status,
-          })
-        )
-      );
+    // ================= SOCKET RESPONSE (CRITICAL FIX) =================
+    if (timer?.sockets?.size) {
+      timer.sockets.forEach((s) => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(
+            JSON.stringify({
+              type: "taskComplete",
+              taskId: data.taskId,
+              aiScore,
+              payOut: cash,
+              rewarded,
+              status,
+              completeMethod: "AI",
+            })
+          );
+        }
+      });
     }
-          activeTaskTimers.delete(key);
 
-  } catch (error){
+    // 2️⃣ NOW safely remove timer
+    activeTaskTimers.delete(key);
+
+  } catch (error) {
     console.error("Error checking grammar:", error.message);
 
-    if (timer?.sockets?.length) {
-      timer.sockets.forEach((s) =>
-        s.send(
-          JSON.stringify({
-            type: "taskError",
-            taskId: data.taskId,
-            error: error.message || "Task processing failed",
-          })
-        )
-      );
+    const timer = activeTaskTimers.get(key);
+
+    if (timer?.sockets?.size) {
+      timer.sockets.forEach((s) => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(
+            JSON.stringify({
+              type: "taskError",
+              taskId: data.taskId,
+              error: error.message || "Task failed",
+            })
+          );
+        }
+      });
     }
   }
 }
