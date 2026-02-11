@@ -389,6 +389,8 @@ userConnections.set(ws.uid, new Set([ws]));
       }
 const LanguageToolApi = require("languagetool-api"); 
 
+const fetch = require("node-fetch"); // npm i node-fetch
+
 if (
   data.type === "submitTask" &&
   data.uid &&
@@ -400,25 +402,34 @@ if (
   let timer;
 
   try {
-    // 1️⃣ Stop the timer (but keep sockets)
+    // 1️⃣ Stop active timer (but keep sockets)
     if (activeTaskTimers.has(key)) {
       timer = activeTaskTimers.get(key);
-      clearInterval(timer.intervalId); // stop countdown
+      clearInterval(timer.intervalId);
     }
 
-    // ================= GRAMMAR CHECK =================
-    const [originalErrors, refinedErrors] = await Promise.all([
-      LanguageToolApi.check({ text: data.originalText, language: "en-US" }),
-      LanguageToolApi.check({ text: data.refinedText, language: "en-US" }),
-    ]);
+    // ================= GRAMMAR SCORE =================
+    const language = "en-US";
 
-    const originalCount = originalErrors.matches.length;
-    const refinedCount = refinedErrors.matches.length;
+    const checkText = async (text) => {
+      const formData = new URLSearchParams();
+      formData.append("text", text);
+      formData.append("language", language);
 
-    // ================= COMPUTE SCORE =================
-    // Example: higher score if errors reduced
-    let score = 100 - refinedCount * 10 + (originalCount - refinedCount) * 5;
-    score = Math.max(0, Math.min(100, score)); // clamp 0-100
+      const res = await fetch("https://api.languagetool.org/v2/check", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await res.json();
+      return (result.matches || []).length; // number of errors
+    };
+
+    const originalErrors = await checkText(data.originalText);
+    const refinedErrors = await checkText(data.refinedText);
+
+    let aiScore = 100 - refinedErrors * 10 + (originalErrors - refinedErrors) * 5;
+    aiScore = Math.max(0, Math.min(100, aiScore)); // clamp 0-100
 
     // ================= FIRESTORE TRANSACTION =================
     const userRef = firestore.collection("Users").doc(data.uid);
@@ -437,13 +448,13 @@ if (
       if (!taskSnap.exists || !userSnap.exists) return;
       if (taskSnap.data().status === "Completed") return;
 
-      if (score >= 92) {
+      if (aiScore >= 92) {
         cash = parseInt(taskSnap.data().pay, 10) || 0;
         rewarded = true;
         status = "Completed";
 
         tx.update(taskRef, {
-          aiScore: score, // now deterministic score
+          aiScore,
           reviewedAt: Date.now(),
           status,
           rewarded: true,
@@ -455,7 +466,7 @@ if (
         });
       } else {
         tx.update(taskRef, {
-          aiScore: score,
+          aiScore,
           reviewedAt: Date.now(),
           status,
           rewarded: false,
@@ -471,7 +482,7 @@ if (
             JSON.stringify({
               type: "taskComplete",
               taskId: data.taskId,
-              aiScore: score,
+              aiScore,
               payOut: cash,
               rewarded,
               status,
@@ -482,13 +493,12 @@ if (
       });
     }
 
-    // 2️⃣ Now delete the timer safely
+    // 2️⃣ Delete timer after task completion
     activeTaskTimers.delete(key);
 
   } catch (error) {
     console.error("Error processing task:", error.message);
 
-    const timer = activeTaskTimers.get(key);
     if (timer?.sockets?.size) {
       timer.sockets.forEach((s) => {
         if (s.readyState === WebSocket.OPEN) {
@@ -496,7 +506,7 @@ if (
             JSON.stringify({
               type: "taskError",
               taskId: data.taskId,
-              error: error.message || "Task failed",
+              error: error.message || "Task processing failed",
             })
           );
         }
@@ -504,6 +514,7 @@ if (
     }
   }
 }
+
 
 if (
   data.type === "cancelTask" &&
@@ -643,7 +654,4 @@ app.post("/Aloo", (req, res) => {
 server.listen(port, () => {
   console.log(`Hello Rodger you app is running on port ${port}`);
 });
-
-// timer function
-
 
