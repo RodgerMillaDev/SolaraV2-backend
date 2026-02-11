@@ -402,7 +402,6 @@ if (
     if (activeTaskTimers.has(key)) {
       timer = activeTaskTimers.get(key);
       clearInterval(timer.intervalId);
-      activeTaskTimers.delete(key);
     }
 
     // ================= AI REQUEST WITH RETRY =================
@@ -541,7 +540,9 @@ Corrected:
         )
       );
     }
-  } catch (error) {
+          activeTaskTimers.delete(key);
+
+  } catch (error){
     console.error("Error checking grammar:", error.message);
 
     if (timer?.sockets?.length) {
