@@ -387,7 +387,6 @@ userConnections.set(ws.uid, new Set([ws]));
           );
         }
       }
-const LanguageToolApi = require("languagetool-api"); 
 
 
 if (
@@ -447,7 +446,7 @@ if (
       if (!taskSnap.exists || !userSnap.exists) return;
       if (taskSnap.data().status === "Completed") return;
 
-      if (aiScore >= 92) {
+      if (aiScore >= 90) {
         cash = parseInt(taskSnap.data().pay, 10) || 0;
         rewarded = true;
         status = "Completed";
@@ -629,7 +628,7 @@ app.post("/uploadAITask", upload.none(), async (req, res) => {
         instructions:
           "Fix grammar, spelling, and clarity. Do not change the meaning.",
         originaltext: content,
-        pay: parseInt(jobpay),
+        pay: Number(jobpay),
         status: "active",
       })
       .then(() => {
