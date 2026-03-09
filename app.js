@@ -13,7 +13,18 @@ const {
 const http = require("http");
 const multer = require("multer");
 const WebSocket = require("ws");
+const fs = require('fs');
+const path = require('path');
 
+// If running in Render / production
+if (process.env.GCLOUD_CREDENTIALS) {
+  const credsPath = path.join(__dirname, 'translator-service.json');
+  fs.writeFileSync(
+    credsPath,
+    Buffer.from(process.env.GCLOUD_CREDENTIALS, 'base64')
+  );
+  process.env.GOOGLE_APPLICATION_CREDENTIALS = credsPath;
+}
 app.use(cors({ origin: "*" }));
 
 app.get("/", (req, res) => {
@@ -644,6 +655,64 @@ app.post("/uploadAITask", upload.none(), async (req, res) => {
     });
   }
 });
+const { TranslationServiceClient } = require('@google-cloud/translate').v3;
+
+const translationClient = new TranslationServiceClient();
+const projectId = 'solara-ver2';
+const location = 'global'; // use 'global' unless you want region-specific
+
+app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
+  const { taskType, content, uid, jobpay, trnsLang } = req.body;
+
+  if (!adminUIDS.includes(uid)) {
+    return res.status(403).json({
+      status: 403,
+      msg: "You do not have access",
+    });
+  }
+
+  try {
+    // ----------- Step 1: Translate content -----------
+    const request = {
+      parent: `projects/${projectId}/locations/${location}`,
+      contents: [content],
+      mimeType: 'text/plain',
+      sourceLanguageCode: 'en',
+      targetLanguageCode: trnsLang, // e.g., "de" for German
+    };
+
+    const [response] = await translationClient.translateText(request);
+    const translatedContent = response.translations[0].translatedText;
+
+    // ----------- Step 2: Save task to Firestore -----------
+    const docRef = firestore.collection("Ai-tasks").doc();
+
+    await docRef.set({
+      taskId: docRef.id,
+      assignCount: 0,
+      type: taskType,
+      instructions: `Translate the content to ${trnsLang}. Do not change the meaning.`,
+      originaltext: content,
+      translatedText: translatedContent, // 👈 stored translation
+      language: trnsLang,
+      pay: Number(jobpay),
+      status: "active",
+    });
+
+    res.json({
+      msg: "AI task uploaded",
+      status: 200,
+      translation: translatedContent
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.json({
+      msg: "Error uploading task",
+      status: 300,
+    });
+  }
+});
 
 app.post("/Aloo", (req, res) => {
   res.json({ message: "Wozaaaa" });
@@ -653,3 +722,4 @@ server.listen(port, () => {
   console.log(`Hello Rodger you app is running on port ${port}`);
 });
 
+ 
