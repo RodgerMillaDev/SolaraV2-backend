@@ -661,9 +661,27 @@ const translationClient = new TranslationServiceClient();
 const projectId = 'solara-ver2';
 const location = 'global'; // use 'global' unless you want region-specific
 
+// ---------- Google Cloud Translation Client ----------
+const { TranslationServiceClient } = require('@google-cloud/translate').v3;
+
+async function translateText(text, targetLang) {
+  const request = {
+    parent: `projects/${projectId}/locations/${location}`,
+    contents: [text],
+    mimeType: 'text/plain',
+    sourceLanguageCode: 'en',
+    targetLanguageCode: targetLang,
+  };
+
+  const [response] = await translationClient.translateText(request);
+  return response.translations[0].translatedText;
+}
+
+// ---------- Upload Translation Task Route ----------
 app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
   const { taskType, content, uid, jobpay, trnsLang } = req.body;
 
+  // Only allow admins
   if (!adminUIDS.includes(uid)) {
     return res.status(403).json({
       status: 403,
@@ -672,17 +690,8 @@ app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
   }
 
   try {
-    // ----------- Step 1: Translate content -----------
-    const request = {
-      parent: `projects/${projectId}/locations/${location}`,
-      contents: [content],
-      mimeType: 'text/plain',
-      sourceLanguageCode: 'en',
-      targetLanguageCode: trnsLang, // e.g., "de" for German
-    };
-
-    const [response] = await translationClient.translateText(request);
-    const translatedContent = response.translations[0].translatedText;
+    // ----------- Step 1: Translate content once -----------
+    const translatedContent = await translateText(content, trnsLang);
 
     // ----------- Step 2: Save task to Firestore -----------
     const docRef = firestore.collection("Ai-tasks").doc();
@@ -706,7 +715,7 @@ app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("Upload task error:", error);
     res.json({
       msg: "Error uploading task",
       status: 300,
