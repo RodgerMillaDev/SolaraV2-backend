@@ -662,7 +662,6 @@ const projectId = 'solara-ver2';
 const location = 'global'; // use 'global' unless you want region-specific
 
 // ---------- Google Cloud Translation Client ----------
-const { TranslationServiceClient } = require('@google-cloud/translate').v3;
 
 async function translateText(text, targetLang) {
   const request = {
