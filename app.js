@@ -2,9 +2,11 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const port = 3322;
 const app = express();
 const admin = require("firebase-admin");
+const deepl = require("deepl-node")
 const {
   firestore,
   serverTimestamp,
@@ -13,23 +15,32 @@ const {
 const http = require("http");
 const multer = require("multer");
 const WebSocket = require("ws");
-const fs = require('fs');
-const path = require('path');
 
-// If running in Render / production
-if (process.env.GCLOUD_CREDENTIALS) {
-  const credsPath = path.join(__dirname, 'translator-service.json');
-  fs.writeFileSync(
-    credsPath,
-    Buffer.from(process.env.GCLOUD_CREDENTIALS, 'base64')
-  );
-  process.env.GOOGLE_APPLICATION_CREDENTIALS = credsPath;
-}
+
 app.use(cors({ origin: "*" }));
-
 app.get("/", (req, res) => {
   res.send("Alloo we are live my bwooy!");
 });
+const upload = multer({
+  storage: multer.memoryStorage(),
+});
+
+
+
+
+
+const authKey = process.env.TRANSLATE_AUTHKEY; // replace with your key
+const translator = new deepl.Translator(authKey);
+
+async function translateTxt(content,trnsLang) {
+  const result = await translator.translateText(
+    content,
+    "EN",
+    trnsLang
+  );
+
+  return(result.text);
+}
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -623,9 +634,7 @@ adminUIDS.forEach((uid) => {
 });
 
 // claims end
-const upload = multer({
-  storage: multer.memoryStorage(),
-});
+
 
 app.post("/uploadAITask", upload.none(), async (req, res) => {
   const { taskType, content, uid, jobpay } = req.body;
@@ -655,26 +664,16 @@ app.post("/uploadAITask", upload.none(), async (req, res) => {
     });
   }
 });
-const { TranslationServiceClient } = require('@google-cloud/translate').v3;
 
-const translationClient = new TranslationServiceClient();
-const projectId = 'solara-ver2';
-const location = 'global'; // use 'global' unless you want region-specific
 
-// ---------- Google Cloud Translation Client ----------
+app.post("/Aloo", (req, res) => {
+  res.json({ message: "Wozaaaa" });
+});
 
-async function translateText(text, targetLang) {
-  const request = {
-    parent: `projects/${projectId}/locations/${location}`,
-    contents: [text],
-    mimeType: 'text/plain',
-    sourceLanguageCode: 'en',
-    targetLanguageCode: targetLang,
-  };
+server.listen(port, () => {
+  console.log(`Hello Rodger you app is running on port ${port}`);
+});
 
-  const [response] = await translationClient.translateText(request);
-  return response.translations[0].translatedText;
-}
 
 // ---------- Upload Translation Task Route ----------
 app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
@@ -689,19 +688,33 @@ app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
   }
 
   try {
-    // ----------- Step 1: Translate content once -----------
-    const translatedContent = await translateText(content, trnsLang);
+    // ----------- Step 1: Translate content -----------
+    const translatedContent = await translateTxt(content, trnsLang);
 
     // ----------- Step 2: Save task to Firestore -----------
     const docRef = firestore.collection("Ai-tasks").doc();
+    const langs = [
+      {lng:"DE", language:"German"},
+      {lng:"FR", language:"French"},
+      {lng:"ES", language:"Spanish"},
+      {lng:"IT", language:"Italian"},
+      {lng:"pt-BR", language:"Portuguese"},
+      {lng:"NL", language:"Dutch"},
+      {lng:"DA", language:"Danish"},
+      {lng:"SV", language:"Swedish"},
+      {lng:"PL", language:"Polish"},
+      {lng:"CS", language:"Czech"},
+      {lng:"SW", language:"Swahili"},
+    ]
 
+    const cleanLng =langs.find(item=>item.lng === trnsLang)
     await docRef.set({
       taskId: docRef.id,
       assignCount: 0,
       type: taskType,
-      instructions: `Translate the content to ${trnsLang}. Do not change the meaning.`,
+      instructions: `Translate the content to ${cleanLng.language}. Do not change the meaning.`,
       originaltext: content,
-      translatedText: translatedContent, // 👈 stored translation
+      translatedText: translatedContent,
       language: trnsLang,
       pay: Number(jobpay),
       status: "active",
@@ -715,19 +728,58 @@ app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
 
   } catch (error) {
     console.error("Upload task error:", error);
-    res.json({
+    res.status(500).json({
       msg: "Error uploading task",
-      status: 300,
+      status: 500,
+      error: error.message
     });
   }
 });
 
-app.post("/Aloo", (req, res) => {
-  res.json({ message: "Wozaaaa" });
-});
+// upload fact check route 
 
-server.listen(port, () => {
-  console.log(`Hello Rodger you app is running on port ${port}`);
-});
 
- 
+app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
+  const { taskType, explanation, statement, verdict, jobpay,uid } = req.body;
+
+  // Only allow admins
+  if (!adminUIDS.includes(uid)) {
+    return res.status(403).json({
+      status: 403,
+      msg: "You do not have access",
+    });
+  }
+
+  try {
+
+
+    // ----------- Step 2: Save task to Firestore -----------
+    const docRef = firestore.collection("Ai-tasks").doc();
+  
+
+    await docRef.set({
+      taskId: docRef.id,
+      assignCount: 0,
+      type: taskType,
+      instructions: `Is the below statement TRUE or FALSE. Give your reason.`,
+      statement: statement,
+      verdict: verdict,
+      explanation: explanation,
+      pay: Number(jobpay),
+      status: "active",
+    });
+
+    res.json({
+      msg: "AI task uploaded",
+      status: 200,
+    });
+
+  } catch (error) {
+    console.error("Upload task error:", error);
+    res.status(500).json({
+      msg: "Error uploading task",
+      status: 500,
+      error: error.message
+    });
+  }
+});
