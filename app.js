@@ -340,7 +340,7 @@ userConnections.set(ws.uid, new Set([ws]));
               .doc(task.taskId);
             batch.set(taskRef, {
               taskId: task.taskId,
-              assignedTask,
+              task:task,
               type: task.type,
               pay: task.pay,
               instructions: task.instructions,
