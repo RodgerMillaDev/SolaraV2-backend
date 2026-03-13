@@ -320,10 +320,10 @@ userConnections.set(ws.uid, new Set([ws]));
             assignedTasks.push({
               taskId: task.taskId,
               instructions: task.instructions,
-              originaltext: task.originaltext,
               pay: task.pay,
               status: "Pending",
               type: task.type,
+              mainTask:task
             });
           }
         });
@@ -340,10 +340,10 @@ userConnections.set(ws.uid, new Set([ws]));
               .doc(task.taskId);
             batch.set(taskRef, {
               taskId: task.taskId,
+              assignedTask,
               type: task.type,
               pay: task.pay,
               instructions: task.instructions,
-              originaltext: task.originaltext,
               status: task.status,
               assignedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
