@@ -31,6 +31,7 @@ const upload = multer({
 
 const authKey = process.env.TRANSLATE_AUTHKEY; // replace with your key
 const translator = new deepl.Translator(authKey);
+console.log(process.env.TRANSLATE_AUTHKEY)
 
 async function translateTxt(content,trnsLang) {
   const result = await translator.translateText(
@@ -278,7 +279,7 @@ userConnections.set(ws.uid, new Set([ws]));
         const taskQuery = await firestore
           .collection("Ai-tasks")
           .where("status", "==", "active")
-          .limit(4)
+          .limit(10)
           .get();
 
         if (taskQuery.empty) {
