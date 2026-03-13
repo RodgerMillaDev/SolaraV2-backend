@@ -2,3 +2,4 @@
 .env
 .env.*
 translator-service.json
+node_modules/
