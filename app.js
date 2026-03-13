@@ -1,6 +1,6 @@
 require("dotenv").config();
-
 const express = require("express");
+const { pipeline } =  import("@xenova/transformers");
 const cors = require("cors");
 const path = require("path");
 const port = 3322;
@@ -31,8 +31,6 @@ const upload = multer({
 
 const authKey = process.env.TRANSLATE_AUTHKEY; // replace with your key
 const translator = new deepl.Translator(authKey);
-console.log(process.env.TRANSLATE_AUTHKEY)
-
 async function translateTxt(content,trnsLang) {
   const result = await translator.translateText(
     content,
@@ -416,10 +414,9 @@ if (
   data.type === "submitTask" &&
   data.uid &&
   data.taskId &&
-  data.originalText &&
-  data.refinedText
-) {
-  const key = `${data.uid}_${data.taskId}`;
+  data.taskType) {
+    if(data.taskType == "Content Review"){
+const key = `${data.uid}_${data.taskId}`;
   let timer;
 
   try {
@@ -534,6 +531,137 @@ if (
       });
     }
   }
+    }
+    if (data.taskType === "Content Translation") {
+  const key = `${data.uid}_${data.taskId}`;
+  let timer;
+
+  try {
+    // Stop active timer but keep sockets
+    if (activeTaskTimers.has(key)) {
+      timer = activeTaskTimers.get(key);
+      clearInterval(timer.intervalId);
+    }
+
+    // ---------------- SCORE TRANSLATION ----------------
+    // data.originalText = reference (already translated)
+    // data.refinedText = user's translation
+    const reference = data.originalText;
+    const userText = data.translatedText;
+
+    // Load embedding model
+    const model = await loadModel();
+
+    // Embed texts
+    const emb1 = await model(reference);
+    const emb2 = await model(userText);
+
+    // Pool embeddings
+    const vec1 = meanPooling(emb1);
+    const vec2 = meanPooling(emb2);
+
+    // Cosine similarity
+    const semanticScore = cosineSimilarity(vec1, vec2) * 100;
+
+    // Grammar errors (optional, can be language-specific)
+    const grammarErr = await grammarErrors(userText);
+    const grammarScore = Math.max(0, 100 - grammarErr * 10);
+
+    // Length ratio
+    const lenRatio =
+      Math.min(reference.length, userText.length) /
+      Math.max(reference.length, userText.length);
+    const lengthScore = lenRatio * 100;
+
+    // Weighted final score
+    let aiScore =
+      semanticScore * 0.7 + grammarScore * 0.2 + lengthScore * 0.1;
+
+    aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+
+    // ---------------- FIRESTORE TRANSACTION ----------------
+    const userRef = firestore.collection("Users").doc(data.uid);
+    const taskRef = userRef.collection("assignedTasks").doc(data.taskId);
+
+    let cash = 0;
+    let rewarded = false;
+    let status = "Failed";
+
+    await firestore.runTransaction(async (tx) => {
+      const [taskSnap, userSnap] = await Promise.all([
+        tx.get(taskRef),
+        tx.get(userRef),
+      ]);
+
+      if (!taskSnap.exists || !userSnap.exists) return;
+      if (taskSnap.data().status === "Completed") return;
+
+      if (aiScore >= 90) {
+        cash = parseInt(taskSnap.data().pay, 10) || 0;
+        rewarded = true;
+        status = "Completed";
+
+        tx.update(taskRef, {
+          aiScore,
+          reviewedAt: Date.now(),
+          status,
+          rewarded: true,
+        });
+
+        tx.update(userRef, {
+          accountBalance:
+            (userSnap.data().accountBalance || 0) + cash,
+        });
+      } else {
+        tx.update(taskRef, {
+          aiScore,
+          reviewedAt: Date.now(),
+          status,
+          rewarded: false,
+        });
+      }
+    });
+
+    // ---------------- SOCKET RESPONSE ----------------
+    if (timer?.sockets?.size) {
+      timer.sockets.forEach((s) => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(
+            JSON.stringify({
+              type: "taskComplete",
+              taskId: data.taskId,
+              aiScore,
+              payOut: cash,
+              rewarded,
+              status,
+              completeMethod: "Instant",
+            })
+          );
+        }
+      });
+    }
+
+    // 2️⃣ Delete timer after task completion
+    activeTaskTimers.delete(key);
+  } catch (error) {
+    console.error("Error processing translation task:", error.message);
+
+    if (timer?.sockets?.size) {
+      timer.sockets.forEach((s) => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(
+            JSON.stringify({
+              type: "taskError",
+              taskId: data.taskId,
+              error: error.message || "Task processing failed",
+            })
+          );
+        }
+      });
+    }
+  }
+}
+  
 }
 
 
@@ -784,3 +912,74 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
     });
   }
 });
+
+
+let extractor = null;
+
+// load model once
+async function loadModel() {
+  if (!extractor) {
+    const { pipeline } = await import("@xenova/transformers");
+
+    extractor = await pipeline(
+      "feature-extraction",
+      "Xenova/paraphrase-multilingual-MiniLM-L12-v2"
+    );
+
+    console.log("Embedding model loaded");
+  }
+  return extractor;
+}
+
+// cosine similarity
+function cosineSimilarity(a, b) {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// grammar check using LanguageTool
+async function grammarErrors(text) {
+  const params = new URLSearchParams();
+  params.append("text", text);
+  params.append("language", "de"); // change if needed
+
+  const res = await fetch("https://api.languagetool.org/v2/check", {
+    method: "POST",
+    body: params
+  });
+
+  const data = await res.json();
+  return data.matches.length;
+}
+
+
+function meanPooling(tensor) {
+  const data = tensor.data;
+  const dims = tensor.dims;
+
+  const tokens = dims[1];
+  const size = dims[2];
+
+  const embedding = new Array(size).fill(0);
+
+  for (let t = 0; t < tokens; t++) {
+    for (let i = 0; i < size; i++) {
+      embedding[i] += data[t * size + i];
+    }
+  }
+
+  for (let i = 0; i < size; i++) {
+    embedding[i] /= tokens;
+  }
+
+  return embedding;
+}
