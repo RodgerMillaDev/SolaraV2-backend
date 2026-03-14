@@ -682,7 +682,7 @@ const key = `${data.uid}_${data.taskId}`;
     const userExplanation = data.userExplanation;
 
     const model = await loadModel();
-
+    console.log("fact check stage 1")
     // ---------- 1️⃣ Verdict score ----------
     let verdictScore = 0;
 
@@ -711,6 +711,7 @@ const key = `${data.uid}_${data.taskId}`;
     const grammarScore = Math.max(0, 10 - grammarErr * 2);
 
     // ---------- FINAL SCORE ----------
+    console.log("fact check stage 2")
 
     let aiScore = verdictScore + explanationScore + grammarScore;
 
