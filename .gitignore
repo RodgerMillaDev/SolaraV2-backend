@@ -3,3 +3,4 @@
 .env.*
 translator-service.json
 node_modules/
+node_modules/@xenova/
