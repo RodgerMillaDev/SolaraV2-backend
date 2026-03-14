@@ -544,9 +544,8 @@ const key = `${data.uid}_${data.taskId}`;
     }
 
     // ---------------- SCORE TRANSLATION ----------------
-    // data.originalText = reference (already translated)
-    // data.refinedText = user's translation
-    const reference = data.originalText;
+
+    const reference = data.textotranslate;
     const userText = data.translatedText;
 
     // Load embedding model
@@ -661,7 +660,168 @@ const key = `${data.uid}_${data.taskId}`;
     }
   }
 }
-  
+  if (data.taskType === "Fact Check") {
+
+  const key = `${data.uid}_${data.taskId}`;
+  let timer;
+
+  try {
+
+    // Stop active timer
+    if (activeTaskTimers.has(key)) {
+      timer = activeTaskTimers.get(key);
+      clearInterval(timer.intervalId);
+    }
+
+    // ---------------- FACT CHECK SCORING ----------------
+
+    const correctVerdict = data.originalverdict;
+    const userVerdict = data.userVerdict;
+
+    const correctExplanation = data.originalExplanation;
+    const userExplanation = data.userExplanation;
+
+    const model = await loadModel();
+
+    // ---------- 1️⃣ Verdict score ----------
+    let verdictScore = 0;
+
+    if (
+      correctVerdict.toLowerCase().trim() ===
+      userVerdict.toLowerCase().trim()
+    ) {
+      verdictScore = 50;
+    }
+
+    // ---------- 2️⃣ Explanation similarity ----------
+
+    const emb1 = await model(correctExplanation);
+    const emb2 = await model(userExplanation);
+
+    const vec1 = meanPooling(emb1);
+    const vec2 = meanPooling(emb2);
+
+    const similarity = cosineSimilarity(vec1, vec2);
+
+    const explanationScore = similarity * 40;
+
+    // ---------- 3️⃣ Grammar score ----------
+
+    const grammarErr = await grammarErrors(userExplanation);
+    const grammarScore = Math.max(0, 10 - grammarErr * 2);
+
+    // ---------- FINAL SCORE ----------
+
+    let aiScore = verdictScore + explanationScore + grammarScore;
+
+    aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+
+    // ---------------- FIRESTORE TRANSACTION ----------------
+
+    const userRef = firestore.collection("Users").doc(data.uid);
+    const taskRef = userRef.collection("assignedTasks").doc(data.taskId);
+
+    let cash = 0;
+    let rewarded = false;
+    let status = "Failed";
+
+    await firestore.runTransaction(async (tx) => {
+
+      const [taskSnap, userSnap] = await Promise.all([
+        tx.get(taskRef),
+        tx.get(userRef),
+      ]);
+
+      if (!taskSnap.exists || !userSnap.exists) return;
+      if (taskSnap.data().status === "Completed") return;
+
+      if (aiScore >= 90) {
+
+        cash = parseInt(taskSnap.data().pay, 10) || 0;
+        rewarded = true;
+        status = "Completed";
+
+        tx.update(taskRef, {
+          aiScore,
+          reviewedAt: Date.now(),
+          status,
+          rewarded: true,
+        });
+
+        tx.update(userRef, {
+          accountBalance:
+            (userSnap.data().accountBalance || 0) + cash,
+        });
+
+      } else {
+
+        tx.update(taskRef, {
+          aiScore,
+          reviewedAt: Date.now(),
+          status,
+          rewarded: false,
+        });
+
+      }
+
+    });
+
+    // ---------------- SOCKET RESPONSE ----------------
+
+    if (timer?.sockets?.size) {
+
+      timer.sockets.forEach((s) => {
+
+        if (s.readyState === WebSocket.OPEN) {
+
+          s.send(
+            JSON.stringify({
+              type: "taskComplete",
+              taskId: data.taskId,
+              aiScore,
+              payOut: cash,
+              rewarded,
+              status,
+              completeMethod: "Instant",
+            })
+          );
+
+        }
+
+      });
+
+    }
+
+    // Delete timer
+    activeTaskTimers.delete(key);
+
+  } catch (error) {
+
+    console.error("Error processing fact check task:", error.message);
+
+    if (timer?.sockets?.size) {
+
+      timer.sockets.forEach((s) => {
+
+        if (s.readyState === WebSocket.OPEN) {
+
+          s.send(
+            JSON.stringify({
+              type: "taskError",
+              taskId: data.taskId,
+              error: error.message || "Task processing failed",
+            })
+          );
+
+        }
+
+      });
+
+    }
+
+  }
+
+}
 }
 
 
