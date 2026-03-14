@@ -113,12 +113,13 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
 
 wss.on("connection", (ws) => {
 
-  console.log("RAW MESSAGE:", msg.toString());
+
+  // Expect client to send uid immediately
+  ws.on("message", async (msg) => {
+      console.log("RAW MESSAGE:", msg.toString());
 
   const data = JSON.parse(msg);
   console.log("PARSED MESSAGE:", data);
-  // Expect client to send uid immediately
-  ws.on("message", async (msg) => {
     try {
       const data = JSON.parse(msg);
       if (data.type === "init" && data.uid) {
