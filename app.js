@@ -118,10 +118,9 @@ wss.on("connection", (ws) => {
     try {
       const data = JSON.parse(msg);
       console.log(data);
-           console.log(data.uid);
-        console.log(data.taskId);
-        console.log(data.taskType);
-        console.log(data.type);
+       console.log("this is the socket type: " + data.type)
+
+        
      switch (data.type) {
 
   case "init":
@@ -410,6 +409,8 @@ case "startTask":
 
   break;
   case "submitTask":
+           console.log("this is the task type: " + data.taskType)
+
   if (!data.uid || !data.taskId || !data.taskType) break;
 
   console.log(data.taskType);
@@ -1077,3 +1078,7 @@ function meanPooling(tensor) {
 
   return embedding;
 }
+const alo={"type":"submitTask","taskId":"2WLvJOPKNYWJb4DtT4uI","taskType":"Content Translation","uid":"5wIYOw9dZtMihv3momhP5j18XYz2","textotranslate":"Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.","translatedText":"Michezo hufundisha nidhamu, kazi ya pamoja, na azimio. Wachezaji hufanya mazoezi mara kwa mara, hushinda vikwazo, na hujifunza masomo muhimu kuhusu uvumilivu ambayo pia yanatumika katika changamoto nje ya mashindano."}
+
+console.log(alo); // Should print "submitTask"
+console.log(alo.type); // Should print "submitTask"
