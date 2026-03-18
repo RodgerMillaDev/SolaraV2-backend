@@ -112,14 +112,11 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
 };
 
 wss.on("connection", (ws) => {
-
-
   // Expect client to send uid immediately
   ws.on("message", async (msg) => {
-
     try {
       const data = JSON.parse(msg);
-      console.log(data)
+      console.log(data);
       if (data.type === "init" && data.uid) {
         ws.uid = data.uid;
         ws.taskId = data.taskId || null;
@@ -211,6 +208,9 @@ wss.on("connection", (ws) => {
             );
           }
         }
+
+        return;
+      
       }
       if (data.type === "requestTask" && data.uid) {
         const userRef = firestore.collection("Users").doc(data.uid);
@@ -344,6 +344,8 @@ wss.on("connection", (ws) => {
           });
         }
         saveTask();
+        return;
+      
       }
       if (data.type === "startTask" && data.userId && data.taskId) {
         const duration = 300; // seconds
@@ -399,7 +401,10 @@ wss.on("connection", (ws) => {
             }),
           );
         }
-      }
+      
+      return;
+    
+    }
 
       if (
         data.type === "submitTask" &&
@@ -407,7 +412,7 @@ wss.on("connection", (ws) => {
         data.taskId &&
         data.taskType
       ) {
-        console.log(data.taskType)
+        console.log(data.taskType);
         if (data.taskType == "Content Review") {
           const key = `${data.uid}_${data.taskId}`;
           let timer;
@@ -527,8 +532,6 @@ wss.on("connection", (ws) => {
           }
         }
         if (data.taskType === "Content Translation") {
-          
-
           const key = `${data.uid}_${data.taskId}`;
           let timer;
 
@@ -797,14 +800,14 @@ wss.on("connection", (ws) => {
             }
           }
         }
-      }else{
-        console.log(data.uid)
-        console.log(data.taskId)
-        console.log(data.taskType)
-        console.log(data.type)
-        console.log("something is missing")
+      } else {
+        console.log(data.uid);
+        console.log(data.taskId);
+        console.log(data.taskType);
+        console.log(data.type);
+        console.log("something is missing");
+        return;
       }
-
       if (data.type === "cancelTask" && data.uid && data.taskId) {
         try {
           const key = `${data.uid}_${data.taskId}`;
@@ -857,7 +860,9 @@ wss.on("connection", (ws) => {
             }),
           );
         }
-      }
+      return;
+    
+    }
     } catch (err) {
       console.error("Invalid message", err);
     }
