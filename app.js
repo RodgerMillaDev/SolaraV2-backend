@@ -797,6 +797,8 @@ wss.on("connection", (ws) => {
             }
           }
         }
+      }else{
+        console.log("something is missing")
       }
 
       if (data.type === "cancelTask" && data.uid && data.taskId) {
