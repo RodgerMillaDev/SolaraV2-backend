@@ -116,10 +116,8 @@ wss.on("connection", (ws) => {
 
   // Expect client to send uid immediately
   ws.on("message", async (msg) => {
-      console.log("RAW MESSAGE:", msg.toString());
 
   const data = JSON.parse(msg);
-  console.log("PARSED MESSAGE:", data);
     try {
       const data = JSON.parse(msg);
       if (data.type === "init" && data.uid) {
@@ -409,6 +407,7 @@ wss.on("connection", (ws) => {
         data.taskId &&
         data.taskType
       ) {
+        console.log(data.taskType)
         if (data.taskType == "Content Review") {
           const key = `${data.uid}_${data.taskId}`;
           let timer;
@@ -528,6 +527,8 @@ wss.on("connection", (ws) => {
           }
         }
         if (data.taskType === "Content Translation") {
+          
+
           const key = `${data.uid}_${data.taskId}`;
           let timer;
 
