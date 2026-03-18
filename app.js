@@ -117,9 +117,9 @@ wss.on("connection", (ws) => {
   // Expect client to send uid immediately
   ws.on("message", async (msg) => {
 
-  const data = JSON.parse(msg);
     try {
       const data = JSON.parse(msg);
+      console.log(data)
       if (data.type === "init" && data.uid) {
         ws.uid = data.uid;
         ws.taskId = data.taskId || null;
