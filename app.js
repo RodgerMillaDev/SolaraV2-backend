@@ -114,755 +114,725 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
 wss.on("connection", (ws) => {
   // Expect client to send uid immediately
   ws.on("message", async (msg) => {
+
     try {
       const data = JSON.parse(msg);
       console.log(data);
-      if (data.type === "init" && data.uid) {
-        ws.uid = data.uid;
-        ws.taskId = data.taskId || null;
-
-        // 🚫 SINGLE DEVICE ENFORCEMENT
-        if (userConnections.has(ws.uid)) {
-          const existingSockets = userConnections.get(ws.uid);
-
-          existingSockets.forEach((oldWs) => {
-            try {
-              oldWs.send(
-                JSON.stringify({
-                  type: "forceLogout",
-                  reason: "You logged in from another device",
-                }),
-              );
-              oldWs.close();
-            } catch (e) {}
-          });
-
-          userConnections.delete(ws.uid);
-        }
-
-        // Register new socket
-        userConnections.set(ws.uid, new Set([ws]));
-
-        console.log(
-          `User ${ws.uid} connected, devices: ${userConnections.get(ws.uid).size}`,
-        );
-
-        // ---------- 🔁 RESUME TASK IF PRESENT ----------
-        if (ws.taskId) {
-          try {
-            const taskRef = firestore
-              .collection("Users")
-              .doc(ws.uid)
-              .collection("assignedTasks")
-              .doc(ws.taskId);
-            const snap = await taskRef.get();
-            const task = snap.data();
-            if (!task) {
-              ws.send(
-                JSON.stringify({
-                  type: "resumeError",
-                  reason: "Task not found or unauthorized",
-                }),
-              );
-              return;
-            }
-            if (task.status === "Complete") {
-              ws.send(JSON.stringify({ type: "taskComplete" }));
-              return;
-            }
-            const now = Date.now();
-            const elapsed = Math.floor(
-              (now - task.assignedAt.toMillis()) / 1000,
-            );
-            const remaining = Math.max(task.durationSec - elapsed, 0);
-
-            // 1️⃣ Send immediate remaining time
-            ws.send(
-              JSON.stringify({
-                type: "timerUpdate",
-                remainingTime: remaining,
-              }),
-            );
-
-            console.log(
-              `Resumed task ${ws.taskId} for user ${ws.uid}, remaining ${remaining}s`,
-            );
-
-            // 2️⃣ Attach socket to active timer OR start new one
-            const key = `${ws.uid}_${ws.taskId}`;
-            if (activeTaskTimers.has(key)) {
-              activeTaskTimers.get(key).sockets.add(ws);
-            } else {
-              startTaskTimer({
-                ws,
-                userId: ws.uid,
-                taskId: ws.taskId,
-                duration: task.durationSec,
-                startedAt: task.assignedAt.toMillis(),
-              });
-            }
-          } catch (err) {
-            console.error("Resume failed:", err);
-            ws.send(
-              JSON.stringify({ type: "resumeError", reason: err.message }),
-            );
-          }
-        }
-
-        return;
-      
-      }
-      if (data.type === "requestTask" && data.uid) {
-        const userRef = firestore.collection("Users").doc(data.uid);
-        const userSnap = await userRef.get();
-
-        // ❌ User does not exist
-        if (!userSnap.exists) {
-          ws.send(
-            JSON.stringify({
-              type: "taskResponse",
-              status: "Error",
-              reason: "An error occured. Try again later.",
-            }),
-          );
-          return;
-        }
-
-        const user = userSnap.data();
-
-        // ❌ Not eligible
-        if (!user.jobEligibility) {
-          ws.send(
-            JSON.stringify({
-              type: "taskResponse",
-              status: "Not Eligible",
-              reason: "You are not eligible for tasks at the moment.",
-            }),
-          );
-          return;
-        }
-
-        // ❌ Daily limit reached
-        if (user.dailyTaskTaken >= 30) {
-          ws.send(
-            JSON.stringify({
-              type: "taskResponse",
-              status: "Limit Reached",
-              reason: "Sorry, you've reached your daily task limit!",
-            }),
-          );
-          return;
-        }
-
-        // ❌ Already working on a task
-        if (user.taskID) {
-          ws.send(
-            JSON.stringify({
-              type: "taskResponse",
-              status: "Denied",
-              reason: "You have already been assigned an AI task.",
-            }),
-          );
-          return;
-        }
-
-        // ✅ USER IS ELIGIBLE → FETCH TASK
-        const taskQuery = await firestore
-          .collection("Ai-tasks")
-          .where("status", "==", "active")
-          .limit(10)
-          .get();
-
-        if (taskQuery.empty) {
-          ws.send(
-            JSON.stringify({
-              type: "taskResponse",
-              status: "No Tasks Available",
-              reason: "Sorry, we have no tasks at the moment. Try again later.",
-            }),
-          );
-          return;
-        }
-
-        let assignedTasks = [];
-        const availableTasks = taskQuery.docs.map((doc) => ({
-          taskId: doc.id,
-          ...doc.data(),
-        }));
-
-        const tasksToAssign = availableTasks.slice(0, 4);
-
-        await admin.firestore().runTransaction(async (tx) => {
-          // update user once
-          tx.update(userRef, {
-            dailyTaskTaken: admin.firestore.FieldValue.increment(
-              tasksToAssign.length,
-            ),
-          });
-
-          for (const task of tasksToAssign) {
-            const taskRef = firestore.collection("Ai-tasks").doc(task.taskId);
-
-            tx.update(taskRef, {
-              assignCount: admin.firestore.FieldValue.increment(1),
-              assignedTo: data.uid,
-            });
-
-            assignedTasks.push({
-              taskId: task.taskId,
-              instructions: task.instructions,
-              pay: task.pay,
-              status: "Pending",
-              type: task.type,
-              mainTask: task,
-            });
-          }
-        });
-
-        async function saveTask() {
-          const batch = firestore.batch();
-
-          for (const task of assignedTasks) {
-            const taskRef = firestore
-              .collection("Users")
-              .doc(data.uid)
-              .collection("assignedTasks")
-              .doc(task.taskId);
-            batch.set(taskRef, {
-              taskId: task.taskId,
-              task: task,
-              type: task.type,
-              pay: task.pay,
-              instructions: task.instructions,
-              status: task.status,
-              assignedAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-          }
-          await batch.commit();
-          firestore.collection("Users").doc(data.uid).update({
-            hasTasks: true,
-          });
-        }
-        saveTask();
-        return;
-      
-      }
-      if (data.type === "startTask" && data.userId && data.taskId) {
-        const duration = 300; // seconds
-
-        const taskRef = firestore
-          .collection("Users")
-          .doc(data.userId)
-          .collection("assignedTasks")
-          .doc(data.taskId);
-
-        try {
-          // 1️⃣ Update Firestore FIRST
-          await taskRef.update({
-            status: "active",
-            assignedAt: serverTimestamp(),
-            durationSec: duration,
-          });
-
-          console.log("Task started for:", data.userId);
-
-          // 2️⃣ READ BACK server timestamp (CRITICAL)
-          const snap = await taskRef.get();
-
-          if (!snap.exists) {
-            throw new Error("Task document not found after update");
-          }
-
-          const startedAt = snap.data().assignedAt.toMillis();
-
-          // 3️⃣ START SERVER TIMER ⏱️
-          startTaskTimer({
-            ws,
-            userId: data.userId,
-            taskId: data.taskId,
-            duration,
-            startedAt,
-          });
-
-          // 4️⃣ Respond to client
-          ws.send(
-            JSON.stringify({
-              type: "startTaskResponse",
-              msg: "You are ready to begin",
-            }),
-          );
-        } catch (error) {
-          console.error("Task launch failed:", error);
-
-          ws.send(
-            JSON.stringify({
-              type: "startTaskError",
-              msg: "Sorry, an error occurred when starting the task",
-            }),
-          );
-        }
-      
-      return;
-    
-    }
-
-      if (
-        data.type === "submitTask" &&
-        data.uid &&
-        data.taskId &&
-        data.taskType
-      ) {
-        console.log(data.taskType);
-        if (data.taskType == "Content Review") {
-          const key = `${data.uid}_${data.taskId}`;
-          let timer;
-
-          try {
-            // 1️⃣ Stop active timer (but keep sockets)
-            if (activeTaskTimers.has(key)) {
-              timer = activeTaskTimers.get(key);
-              clearInterval(timer.intervalId);
-            }
-
-            // ================= GRAMMAR SCORE =================
-            const language = "en-US";
-
-            const checkText = async (text) => {
-              const formData = new URLSearchParams();
-              formData.append("text", text);
-              formData.append("language", language);
-
-              const res = await fetch("https://api.languagetool.org/v2/check", {
-                method: "POST",
-                body: formData,
-              });
-
-              const result = await res.json();
-              return (result.matches || []).length; // number of errors
-            };
-
-            const originalErrors = await checkText(data.originalText);
-            const refinedErrors = await checkText(data.refinedText);
-
-            let aiScore =
-              100 - refinedErrors * 10 + (originalErrors - refinedErrors) * 5;
-            aiScore = Math.max(0, Math.min(100, aiScore)); // clamp 0-100
-
-            // ================= FIRESTORE TRANSACTION =================
-            const userRef = firestore.collection("Users").doc(data.uid);
-            const taskRef = userRef
-              .collection("assignedTasks")
-              .doc(data.taskId);
-
-            let cash = 0;
-            let rewarded = false;
-            let status = "Failed";
-
-            await firestore.runTransaction(async (tx) => {
-              const [taskSnap, userSnap] = await Promise.all([
-                tx.get(taskRef),
-                tx.get(userRef),
-              ]);
-
-              if (!taskSnap.exists || !userSnap.exists) return;
-              if (taskSnap.data().status === "Completed") return;
-
-              if (aiScore >= 90) {
-                cash = parseInt(taskSnap.data().pay, 10) || 0;
-                rewarded = true;
-                status = "Completed";
-
-                tx.update(taskRef, {
-                  aiScore,
-                  reviewedAt: Date.now(),
-                  status,
-                  rewarded: true,
-                });
-
-                tx.update(userRef, {
-                  accountBalance: (userSnap.data().accountBalance || 0) + cash,
-                });
-              } else {
-                tx.update(taskRef, {
-                  aiScore,
-                  reviewedAt: Date.now(),
-                  status,
-                  rewarded: false,
-                });
-              }
-            });
-
-            // ================= SOCKET RESPONSE =================
-            if (timer?.sockets?.size) {
-              timer.sockets.forEach((s) => {
-                if (s.readyState === WebSocket.OPEN) {
-                  s.send(
-                    JSON.stringify({
-                      type: "taskComplete",
-                      taskId: data.taskId,
-                      aiScore,
-                      payOut: cash,
-                      rewarded,
-                      status,
-                      completeMethod: "Instant",
-                    }),
-                  );
-                }
-              });
-            }
-
-            // 2️⃣ Delete timer after task completion
-            activeTaskTimers.delete(key);
-          } catch (error) {
-            console.error("Error processing task:", error.message);
-
-            if (timer?.sockets?.size) {
-              timer.sockets.forEach((s) => {
-                if (s.readyState === WebSocket.OPEN) {
-                  s.send(
-                    JSON.stringify({
-                      type: "taskError",
-                      taskId: data.taskId,
-                      error: error.message || "Task processing failed",
-                    }),
-                  );
-                }
-              });
-            }
-          }
-        }
-        if (data.taskType === "Content Translation") {
-          const key = `${data.uid}_${data.taskId}`;
-          let timer;
-
-          try {
-            // Stop active timer but keep sockets
-            if (activeTaskTimers.has(key)) {
-              timer = activeTaskTimers.get(key);
-              clearInterval(timer.intervalId);
-            }
-
-            // ---------------- SCORE TRANSLATION ----------------
-
-            const reference = data.textotranslate;
-            const userText = data.translatedText;
-
-            // Load embedding model
-            const model = await loadModel();
-
-            // Embed texts
-            const emb1 = await model(reference);
-            const emb2 = await model(userText);
-
-            // Pool embeddings
-            const vec1 = meanPooling(emb1);
-            const vec2 = meanPooling(emb2);
-
-            // Cosine similarity
-            const semanticScore = cosineSimilarity(vec1, vec2) * 100;
-
-            // Grammar errors (optional, can be language-specific)
-            const grammarErr = await grammarErrors(userText);
-            const grammarScore = Math.max(0, 100 - grammarErr * 10);
-
-            // Length ratio
-            const lenRatio =
-              Math.min(reference.length, userText.length) /
-              Math.max(reference.length, userText.length);
-            const lengthScore = lenRatio * 100;
-
-            // Weighted final score
-            let aiScore =
-              semanticScore * 0.7 + grammarScore * 0.2 + lengthScore * 0.1;
-
-            aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
-
-            // ---------------- FIRESTORE TRANSACTION ----------------
-            const userRef = firestore.collection("Users").doc(data.uid);
-            const taskRef = userRef
-              .collection("assignedTasks")
-              .doc(data.taskId);
-
-            let cash = 0;
-            let rewarded = false;
-            let status = "Failed";
-
-            await firestore.runTransaction(async (tx) => {
-              const [taskSnap, userSnap] = await Promise.all([
-                tx.get(taskRef),
-                tx.get(userRef),
-              ]);
-
-              if (!taskSnap.exists || !userSnap.exists) return;
-              if (taskSnap.data().status === "Completed") return;
-
-              if (aiScore >= 90) {
-                cash = parseInt(taskSnap.data().pay, 10) || 0;
-                rewarded = true;
-                status = "Completed";
-
-                tx.update(taskRef, {
-                  aiScore,
-                  reviewedAt: Date.now(),
-                  status,
-                  rewarded: true,
-                });
-
-                tx.update(userRef, {
-                  accountBalance: (userSnap.data().accountBalance || 0) + cash,
-                });
-              } else {
-                tx.update(taskRef, {
-                  aiScore,
-                  reviewedAt: Date.now(),
-                  status,
-                  rewarded: false,
-                });
-              }
-            });
-
-            // ---------------- SOCKET RESPONSE ----------------
-            if (timer?.sockets?.size) {
-              timer.sockets.forEach((s) => {
-                if (s.readyState === WebSocket.OPEN) {
-                  s.send(
-                    JSON.stringify({
-                      type: "taskComplete",
-                      taskId: data.taskId,
-                      aiScore,
-                      payOut: cash,
-                      rewarded,
-                      status,
-                      completeMethod: "Instant",
-                    }),
-                  );
-                }
-              });
-            }
-
-            // 2️⃣ Delete timer after task completion
-            activeTaskTimers.delete(key);
-          } catch (error) {
-            console.error("Error processing translation task:", error.message);
-
-            if (timer?.sockets?.size) {
-              timer.sockets.forEach((s) => {
-                if (s.readyState === WebSocket.OPEN) {
-                  s.send(
-                    JSON.stringify({
-                      type: "taskError",
-                      taskId: data.taskId,
-                      error: error.message || "Task processing failed",
-                    }),
-                  );
-                }
-              });
-            }
-          }
-        }
-        if (data.taskType === "Fact Check") {
-          const key = `${data.uid}_${data.taskId}`;
-          let timer;
-
-          try {
-            // Stop active timer
-            if (activeTaskTimers.has(key)) {
-              timer = activeTaskTimers.get(key);
-              clearInterval(timer.intervalId);
-            }
-
-            // ---------------- FACT CHECK SCORING ----------------
-
-            const correctVerdict = data.originalverdict;
-            const userVerdict = data.userVerdict;
-
-            const correctExplanation = data.originalExplanation;
-            const userExplanation = data.userExplanation;
-
-            const model = await loadModel();
-            console.log("fact check stage 1");
-            // ---------- 1️⃣ Verdict score ----------
-            let verdictScore = 0;
-
-            if (
-              correctVerdict.toLowerCase().trim() ===
-              userVerdict.toLowerCase().trim()
-            ) {
-              verdictScore = 50;
-            }
-
-            // ---------- 2️⃣ Explanation similarity ----------
-
-            const emb1 = await model(correctExplanation);
-            const emb2 = await model(userExplanation);
-
-            const vec1 = meanPooling(emb1);
-            const vec2 = meanPooling(emb2);
-
-            const similarity = cosineSimilarity(vec1, vec2);
-
-            const explanationScore = similarity * 40;
-
-            // ---------- 3️⃣ Grammar score ----------
-
-            const grammarErr = await grammarErrors(userExplanation);
-            const grammarScore = Math.max(0, 10 - grammarErr * 2);
-
-            // ---------- FINAL SCORE ----------
-            console.log("fact check stage 2");
-
-            let aiScore = verdictScore + explanationScore + grammarScore;
-
-            aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
-
-            // ---------------- FIRESTORE TRANSACTION ----------------
-
-            const userRef = firestore.collection("Users").doc(data.uid);
-            const taskRef = userRef
-              .collection("assignedTasks")
-              .doc(data.taskId);
-
-            let cash = 0;
-            let rewarded = false;
-            let status = "Failed";
-
-            await firestore.runTransaction(async (tx) => {
-              const [taskSnap, userSnap] = await Promise.all([
-                tx.get(taskRef),
-                tx.get(userRef),
-              ]);
-
-              if (!taskSnap.exists || !userSnap.exists) return;
-              if (taskSnap.data().status === "Completed") return;
-
-              if (aiScore >= 90) {
-                cash = parseInt(taskSnap.data().pay, 10) || 0;
-                rewarded = true;
-                status = "Completed";
-
-                tx.update(taskRef, {
-                  aiScore,
-                  reviewedAt: Date.now(),
-                  status,
-                  rewarded: true,
-                });
-
-                tx.update(userRef, {
-                  accountBalance: (userSnap.data().accountBalance || 0) + cash,
-                });
-              } else {
-                tx.update(taskRef, {
-                  aiScore,
-                  reviewedAt: Date.now(),
-                  status,
-                  rewarded: false,
-                });
-              }
-            });
-
-            // ---------------- SOCKET RESPONSE ----------------
-
-            if (timer?.sockets?.size) {
-              timer.sockets.forEach((s) => {
-                if (s.readyState === WebSocket.OPEN) {
-                  s.send(
-                    JSON.stringify({
-                      type: "taskComplete",
-                      taskId: data.taskId,
-                      aiScore,
-                      payOut: cash,
-                      rewarded,
-                      status,
-                      completeMethod: "Instant",
-                    }),
-                  );
-                }
-              });
-            }
-
-            // Delete timer
-            activeTaskTimers.delete(key);
-          } catch (error) {
-            console.error("Error processing fact check task:", error.message);
-
-            if (timer?.sockets?.size) {
-              timer.sockets.forEach((s) => {
-                if (s.readyState === WebSocket.OPEN) {
-                  s.send(
-                    JSON.stringify({
-                      type: "taskError",
-                      taskId: data.taskId,
-                      error: error.message || "Task processing failed",
-                    }),
-                  );
-                }
-              });
-            }
-          }
-        }
-      } else {
-        console.log(data.uid);
+           console.log(data.uid);
         console.log(data.taskId);
         console.log(data.taskType);
         console.log(data.type);
-        console.log("something is missing");
-        return;
-      }
-      if (data.type === "cancelTask" && data.uid && data.taskId) {
+     switch (data.type) {
+
+  case "init":
+    if (!data.uid) return;
+
+    ws.uid = data.uid;
+    ws.taskId = data.taskId || null;
+
+    // 🚫 SINGLE DEVICE ENFORCEMENT
+    if (userConnections.has(ws.uid)) {
+      const existingSockets = userConnections.get(ws.uid);
+
+      existingSockets.forEach((oldWs) => {
         try {
-          const key = `${data.uid}_${data.taskId}`;
+          oldWs.send(
+            JSON.stringify({
+              type: "forceLogout",
+              reason: "You logged in from another device",
+            })
+          );
+          oldWs.close();
+        } catch (e) {}
+      });
 
-          // ⏱️ Stop & clear timer if it exists
-          if (activeTaskTimers.has(key)) {
-            const timer = activeTaskTimers.get(key);
-            clearInterval(timer.intervalId);
-            activeTaskTimers.delete(key);
+      userConnections.delete(ws.uid);
+    }
 
-            // 🔔 Notify all sockets tied to this task
-            if (timer.sockets) {
-              timer.sockets.forEach((s) => {
-                try {
-                  s.send(
-                    JSON.stringify({
-                      type: "taskCanceled",
-                      taskId: data.taskId,
-                      reason: "User canceled task",
-                    }),
-                  );
-                } catch (err) {
-                  console.error("Socket notify failed:", err);
-                }
-              });
-            }
-          }
+    // Register new socket
+    userConnections.set(ws.uid, new Set([ws]));
 
-          // 🔥 Update Firestore
-          const taskRef = firestore
-            .collection("Users")
-            .doc(data.uid)
-            .collection("assignedTasks")
-            .doc(data.taskId);
+    console.log(
+      `User ${ws.uid} connected, devices: ${userConnections.get(ws.uid).size}`
+    );
 
-          await taskRef.update({
-            status: "Canceled",
-            canceledAt: admin.firestore.FieldValue.serverTimestamp(),
-            rewarded: false,
+    // ---------- 🔁 RESUME TASK IF PRESENT ----------
+    if (ws.taskId) {
+      try {
+        const taskRef = firestore
+          .collection("Users")
+          .doc(ws.uid)
+          .collection("assignedTasks")
+          .doc(ws.taskId);
+
+        const snap = await taskRef.get();
+        const task = snap.data();
+
+        if (!task) {
+          ws.send(JSON.stringify({
+            type: "resumeError",
+            reason: "Task not found or unauthorized",
+          }));
+          return;
+        }
+
+        if (task.status === "Complete") {
+          ws.send(JSON.stringify({ type: "taskComplete" }));
+          return;
+        }
+
+        const now = Date.now();
+        const elapsed = Math.floor(
+          (now - task.assignedAt.toMillis()) / 1000
+        );
+        const remaining = Math.max(task.durationSec - elapsed, 0);
+
+        // 1️⃣ Send immediate remaining time
+        ws.send(JSON.stringify({
+          type: "timerUpdate",
+          remainingTime: remaining,
+        }));
+
+        console.log(
+          `Resumed task ${ws.taskId} for user ${ws.uid}, remaining ${remaining}s`
+        );
+
+        // 2️⃣ Attach socket to active timer OR start new one
+        const key = `${ws.uid}_${ws.taskId}`;
+
+        if (activeTaskTimers.has(key)) {
+          activeTaskTimers.get(key).sockets.add(ws);
+        } else {
+          startTaskTimer({
+            ws,
+            userId: ws.uid,
+            taskId: ws.taskId,
+            duration: task.durationSec,
+            startedAt: task.assignedAt.toMillis(),
+          });
+        }
+
+      } catch (err) {
+        console.error("Resume failed:", err);
+
+        ws.send(JSON.stringify({
+          type: "resumeError",
+          reason: err.message,
+        }));
+      }
+    }
+
+    break;
+    case "requestTask":
+  if (!data.uid) return;
+
+  const userRef = firestore.collection("Users").doc(data.uid);
+  const userSnap = await userRef.get();
+
+  // ❌ User does not exist
+  if (!userSnap.exists) {
+    ws.send(JSON.stringify({
+      type: "taskResponse",
+      status: "Error",
+      reason: "An error occured. Try again later.",
+    }));
+    break;
+  }
+
+  const user = userSnap.data();
+
+  // ❌ Not eligible
+  if (!user.jobEligibility) {
+    ws.send(JSON.stringify({
+      type: "taskResponse",
+      status: "Not Eligible",
+      reason: "You are not eligible for tasks at the moment.",
+    }));
+    break;
+  }
+
+  // ❌ Daily limit reached
+  if (user.dailyTaskTaken >= 30) {
+    ws.send(JSON.stringify({
+      type: "taskResponse",
+      status: "Limit Reached",
+      reason: "Sorry, you've reached your daily task limit!",
+    }));
+    break;
+  }
+
+  // ❌ Already working on a task
+  if (user.taskID) {
+    ws.send(JSON.stringify({
+      type: "taskResponse",
+      status: "Denied",
+      reason: "You have already been assigned an AI task.",
+    }));
+    break;
+  }
+
+  // ✅ USER IS ELIGIBLE → FETCH TASK
+  const taskQuery = await firestore
+    .collection("Ai-tasks")
+    .where("status", "==", "active")
+    .limit(10)
+    .get();
+
+  if (taskQuery.empty) {
+    ws.send(JSON.stringify({
+      type: "taskResponse",
+      status: "No Tasks Available",
+      reason: "Sorry, we have no tasks at the moment. Try again later.",
+    }));
+    break;
+  }
+
+  let assignedTasks = [];
+
+  const availableTasks = taskQuery.docs.map((doc) => ({
+    taskId: doc.id,
+    ...doc.data(),
+  }));
+
+  const tasksToAssign = availableTasks.slice(0, 4);
+
+  await admin.firestore().runTransaction(async (tx) => {
+    // update user once
+    tx.update(userRef, {
+      dailyTaskTaken: admin.firestore.FieldValue.increment(
+        tasksToAssign.length
+      ),
+    });
+
+    for (const task of tasksToAssign) {
+      const taskRef = firestore.collection("Ai-tasks").doc(task.taskId);
+
+      tx.update(taskRef, {
+        assignCount: admin.firestore.FieldValue.increment(1),
+        assignedTo: data.uid,
+      });
+
+      assignedTasks.push({
+        taskId: task.taskId,
+        instructions: task.instructions,
+        pay: task.pay,
+        status: "Pending",
+        type: task.type,
+        mainTask: task,
+      });
+    }
+  });
+
+  // ✅ Save tasks in batch
+  const batch = firestore.batch();
+
+  for (const task of assignedTasks) {
+    const taskRef = firestore
+      .collection("Users")
+      .doc(data.uid)
+      .collection("assignedTasks")
+      .doc(task.taskId);
+
+    batch.set(taskRef, {
+      taskId: task.taskId,
+      task: task,
+      type: task.type,
+      pay: task.pay,
+      instructions: task.instructions,
+      status: task.status,
+      assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  await batch.commit();
+
+  await firestore.collection("Users").doc(data.uid).update({
+    hasTasks: true,
+  });
+
+  break;
+case "startTask":
+  if (!data.userId || !data.taskId) break;
+
+  const duration = 300; // seconds
+
+  const taskRef = firestore
+    .collection("Users")
+    .doc(data.userId)
+    .collection("assignedTasks")
+    .doc(data.taskId);
+
+  try {
+    // 1️⃣ Update Firestore FIRST
+    await taskRef.update({
+      status: "active",
+      assignedAt: serverTimestamp(),
+      durationSec: duration,
+    });
+
+    console.log("Task started for:", data.userId);
+
+    // 2️⃣ READ BACK server timestamp (CRITICAL)
+    const snap = await taskRef.get();
+
+    if (!snap.exists) {
+      throw new Error("Task document not found after update");
+    }
+
+    const startedAt = snap.data().assignedAt.toMillis();
+
+    // 3️⃣ START SERVER TIMER ⏱️
+    startTaskTimer({
+      ws,
+      userId: data.userId,
+      taskId: data.taskId,
+      duration,
+      startedAt,
+    });
+
+    // 4️⃣ Respond to client
+    ws.send(
+      JSON.stringify({
+        type: "startTaskResponse",
+        msg: "You are ready to begin",
+      }),
+    );
+  } catch (error) {
+    console.error("Task launch failed:", error);
+
+    ws.send(
+      JSON.stringify({
+        type: "startTaskError",
+        msg: "Sorry, an error occurred when starting the task",
+      }),
+    );
+  }
+
+  break;
+  case "submitTask":
+  if (!data.uid || !data.taskId || !data.taskType) break;
+
+  console.log(data.taskType);
+
+  if (data.taskType == "Content Review") {
+    const key = `${data.uid}_${data.taskId}`;
+    let timer;
+
+    try {
+      if (activeTaskTimers.has(key)) {
+        timer = activeTaskTimers.get(key);
+        clearInterval(timer.intervalId);
+      }
+
+      const language = "en-US";
+
+      const checkText = async (text) => {
+        const formData = new URLSearchParams();
+        formData.append("text", text);
+        formData.append("language", language);
+
+        const res = await fetch("https://api.languagetool.org/v2/check", {
+          method: "POST",
+          body: formData,
+        });
+
+        const result = await res.json();
+        return (result.matches || []).length;
+      };
+
+      const originalErrors = await checkText(data.originalText);
+      const refinedErrors = await checkText(data.refinedText);
+
+      let aiScore =
+        100 - refinedErrors * 10 + (originalErrors - refinedErrors) * 5;
+      aiScore = Math.max(0, Math.min(100, aiScore));
+
+      const userRef = firestore.collection("Users").doc(data.uid);
+      const taskRef = userRef
+        .collection("assignedTasks")
+        .doc(data.taskId);
+
+      let cash = 0;
+      let rewarded = false;
+      let status = "Failed";
+
+      await firestore.runTransaction(async (tx) => {
+        const [taskSnap, userSnap] = await Promise.all([
+          tx.get(taskRef),
+          tx.get(userRef),
+        ]);
+
+        if (!taskSnap.exists || !userSnap.exists) return;
+        if (taskSnap.data().status === "Completed") return;
+
+        if (aiScore >= 90) {
+          cash = parseInt(taskSnap.data().pay, 10) || 0;
+          rewarded = true;
+          status = "Completed";
+
+          tx.update(taskRef, {
+            aiScore,
+            reviewedAt: Date.now(),
+            status,
+            rewarded: true,
           });
 
-          console.log(`Task ${data.taskId} canceled by user ${data.uid}`);
-        } catch (err) {
-          console.error("Cancel task failed:", err);
-
-          ws.send(
-            JSON.stringify({
-              type: "cancelTaskError",
-              msg: "Failed to cancel task. Try again.",
-            }),
-          );
+          tx.update(userRef, {
+            accountBalance: (userSnap.data().accountBalance || 0) + cash,
+          });
+        } else {
+          tx.update(taskRef, {
+            aiScore,
+            reviewedAt: Date.now(),
+            status,
+            rewarded: false,
+          });
         }
-      return;
-    
+      });
+
+      if (timer?.sockets?.size) {
+        timer.sockets.forEach((s) => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(
+              JSON.stringify({
+                type: "taskComplete",
+                taskId: data.taskId,
+                aiScore,
+                payOut: cash,
+                rewarded,
+                status,
+                completeMethod: "Instant",
+              }),
+            );
+          }
+        });
+      }
+
+      activeTaskTimers.delete(key);
+    } catch (error) {
+      console.error("Error processing task:", error.message);
+
+      if (timer?.sockets?.size) {
+        timer.sockets.forEach((s) => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(
+              JSON.stringify({
+                type: "taskError",
+                taskId: data.taskId,
+                error: error.message || "Task processing failed",
+              }),
+            );
+          }
+        });
+      }
     }
+  }
+
+  if (data.taskType === "Content Translation") {
+    const key = `${data.uid}_${data.taskId}`;
+    let timer;
+
+    try {
+      if (activeTaskTimers.has(key)) {
+        timer = activeTaskTimers.get(key);
+        clearInterval(timer.intervalId);
+      }
+
+      const reference = data.textotranslate;
+      const userText = data.translatedText;
+
+      const model = await loadModel();
+
+      const emb1 = await model(reference);
+      const emb2 = await model(userText);
+
+      const vec1 = meanPooling(emb1);
+      const vec2 = meanPooling(emb2);
+
+      const semanticScore = cosineSimilarity(vec1, vec2) * 100;
+
+      const grammarErr = await grammarErrors(userText);
+      const grammarScore = Math.max(0, 100 - grammarErr * 10);
+
+      const lenRatio =
+        Math.min(reference.length, userText.length) /
+        Math.max(reference.length, userText.length);
+      const lengthScore = lenRatio * 100;
+
+      let aiScore =
+        semanticScore * 0.7 + grammarScore * 0.2 + lengthScore * 0.1;
+
+      aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+
+      const userRef = firestore.collection("Users").doc(data.uid);
+      const taskRef = userRef
+        .collection("assignedTasks")
+        .doc(data.taskId);
+
+      let cash = 0;
+      let rewarded = false;
+      let status = "Failed";
+
+      await firestore.runTransaction(async (tx) => {
+        const [taskSnap, userSnap] = await Promise.all([
+          tx.get(taskRef),
+          tx.get(userRef),
+        ]);
+
+        if (!taskSnap.exists || !userSnap.exists) return;
+        if (taskSnap.data().status === "Completed") return;
+
+        if (aiScore >= 90) {
+          cash = parseInt(taskSnap.data().pay, 10) || 0;
+          rewarded = true;
+          status = "Completed";
+
+          tx.update(taskRef, {
+            aiScore,
+            reviewedAt: Date.now(),
+            status,
+            rewarded: true,
+          });
+
+          tx.update(userRef, {
+            accountBalance: (userSnap.data().accountBalance || 0) + cash,
+          });
+        } else {
+          tx.update(taskRef, {
+            aiScore,
+            reviewedAt: Date.now(),
+            status,
+            rewarded: false,
+          });
+        }
+      });
+
+      if (timer?.sockets?.size) {
+        timer.sockets.forEach((s) => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(
+              JSON.stringify({
+                type: "taskComplete",
+                taskId: data.taskId,
+                aiScore,
+                payOut: cash,
+                rewarded,
+                status,
+                completeMethod: "Instant",
+              }),
+            );
+          }
+        });
+      }
+
+      activeTaskTimers.delete(key);
+    } catch (error) {
+      console.error("Error processing translation task:", error.message);
+
+      if (timer?.sockets?.size) {
+        timer.sockets.forEach((s) => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(
+              JSON.stringify({
+                type: "taskError",
+                taskId: data.taskId,
+                error: error.message || "Task processing failed",
+              }),
+            );
+          }
+        });
+      }
+    }
+  }
+
+  if (data.taskType === "Fact Check") {
+    const key = `${data.uid}_${data.taskId}`;
+    let timer;
+
+    try {
+      if (activeTaskTimers.has(key)) {
+        timer = activeTaskTimers.get(key);
+        clearInterval(timer.intervalId);
+      }
+
+      const correctVerdict = data.originalverdict;
+      const userVerdict = data.userVerdict;
+
+      const correctExplanation = data.originalExplanation;
+      const userExplanation = data.userExplanation;
+
+      const model = await loadModel();
+
+      let verdictScore = 0;
+
+      if (
+        correctVerdict.toLowerCase().trim() ===
+        userVerdict.toLowerCase().trim()
+      ) {
+        verdictScore = 50;
+      }
+
+      const emb1 = await model(correctExplanation);
+      const emb2 = await model(userExplanation);
+
+      const vec1 = meanPooling(emb1);
+      const vec2 = meanPooling(emb2);
+
+      const similarity = cosineSimilarity(vec1, vec2);
+      const explanationScore = similarity * 40;
+
+      const grammarErr = await grammarErrors(userExplanation);
+      const grammarScore = Math.max(0, 10 - grammarErr * 2);
+
+      let aiScore = verdictScore + explanationScore + grammarScore;
+      aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+
+      const userRef = firestore.collection("Users").doc(data.uid);
+      const taskRef = userRef
+        .collection("assignedTasks")
+        .doc(data.taskId);
+
+      let cash = 0;
+      let rewarded = false;
+      let status = "Failed";
+
+      await firestore.runTransaction(async (tx) => {
+        const [taskSnap, userSnap] = await Promise.all([
+          tx.get(taskRef),
+          tx.get(userRef),
+        ]);
+
+        if (!taskSnap.exists || !userSnap.exists) return;
+        if (taskSnap.data().status === "Completed") return;
+
+        if (aiScore >= 90) {
+          cash = parseInt(taskSnap.data().pay, 10) || 0;
+          rewarded = true;
+          status = "Completed";
+
+          tx.update(taskRef, {
+            aiScore,
+            reviewedAt: Date.now(),
+            status,
+            rewarded: true,
+          });
+
+          tx.update(userRef, {
+            accountBalance: (userSnap.data().accountBalance || 0) + cash,
+          });
+        } else {
+          tx.update(taskRef, {
+            aiScore,
+            reviewedAt: Date.now(),
+            status,
+            rewarded: false,
+          });
+        }
+      });
+
+      if (timer?.sockets?.size) {
+        timer.sockets.forEach((s) => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(
+              JSON.stringify({
+                type: "taskComplete",
+                taskId: data.taskId,
+                aiScore,
+                payOut: cash,
+                rewarded,
+                status,
+                completeMethod: "Instant",
+              }),
+            );
+          }
+        });
+      }
+
+      activeTaskTimers.delete(key);
+    } catch (error) {
+      console.error("Error processing fact check task:", error.message);
+
+      if (timer?.sockets?.size) {
+        timer.sockets.forEach((s) => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(
+              JSON.stringify({
+                type: "taskError",
+                taskId: data.taskId,
+                error: error.message || "Task processing failed",
+              }),
+            );
+          }
+        });
+      }
+    }
+  }
+
+  break;
+
+
+  case "cancelTask":
+  if (!data.uid || !data.taskId) break;
+
+  try {
+    const key = `${data.uid}_${data.taskId}`;
+
+    // ⏱️ Stop & clear timer if it exists
+    if (activeTaskTimers.has(key)) {
+      const timer = activeTaskTimers.get(key);
+      clearInterval(timer.intervalId);
+      activeTaskTimers.delete(key);
+
+      // 🔔 Notify all sockets tied to this task
+      if (timer.sockets) {
+        timer.sockets.forEach((s) => {
+          try {
+            s.send(
+              JSON.stringify({
+                type: "taskCanceled",
+                taskId: data.taskId,
+                reason: "User canceled task",
+              }),
+            );
+          } catch (err) {
+            console.error("Socket notify failed:", err);
+          }
+        });
+      }
+    }
+
+    // 🔥 Update Firestore
+    const taskRef = firestore
+      .collection("Users")
+      .doc(data.uid)
+      .collection("assignedTasks")
+      .doc(data.taskId);
+
+    await taskRef.update({
+      status: "Canceled",
+      canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+      rewarded: false,
+    });
+
+    console.log(`Task ${data.taskId} canceled by user ${data.uid}`);
+  } catch (err) {
+    console.error("Cancel task failed:", err);
+
+    ws.send(
+      JSON.stringify({
+        type: "cancelTaskError",
+        msg: "Failed to cancel task. Try again.",
+      }),
+    );
+  }
+
+  break;
+
+}
+     
+    
+
+   
     } catch (err) {
       console.error("Invalid message", err);
     }
