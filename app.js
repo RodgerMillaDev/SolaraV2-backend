@@ -798,6 +798,10 @@ wss.on("connection", (ws) => {
           }
         }
       }else{
+        console.log(data.uid)
+        console.log(data.taskId)
+        console.log(data.taskType)
+        console.log(data.type)
         console.log("something is missing")
       }
 
