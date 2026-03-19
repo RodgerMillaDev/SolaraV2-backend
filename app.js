@@ -38,6 +38,18 @@ const wss = new WebSocket.Server({ server });
 let userConnections = new Map(); // uid -> set of ws
 
 
+let modelInstance = null;
+
+async function initModel() {
+  modelInstance = await loadModel();
+  console.log("Model ready globally");
+}
+
+server.listen(port, async () => {
+  await initModel(); // run at server startup
+  console.log(`Hello Rodger you app is running on port ${port}`);
+});
+
 
 
 let extractor = null;
@@ -108,8 +120,6 @@ function meanPooling(tensor) {
 
   return embedding;
 }
-
-
 
 // 1️⃣ GLOBAL TIMER REGISTRY
 const activeTaskTimers = new Map();
@@ -606,19 +616,42 @@ case "startTask":
     const key = `${data.uid}_${data.taskId}`;
     let timer;
 
+
+
     try {
+
+
+      if (!modelInstance) {
+  console.log("Model not ready yet");
+
+  if (timer?.sockets?.size) {
+    timer.sockets.forEach((s) => {
+      if (s.readyState === WebSocket.OPEN) {
+        s.send(
+          JSON.stringify({
+            type: "taskError",
+            taskId: data.taskId,
+            error: "System warming up, try again in a few seconds",
+          })
+        );
+      }
+    });
+  }
+
+  return;
+       }
+
       if (activeTaskTimers.has(key)) {
         timer = activeTaskTimers.get(key);
         clearInterval(timer.intervalId);
       }
 
-      const model = await loadModel();
-           console.log(model)
+
 
       const reference = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.";
       const userText = "Michezo hufundisha nidhamu, kazi ya pamoja, na azimio. Wachezaji hufanya mazoezi mara kwa mara, hushinda vikwazo, na hujifunza masomo muhimu kuhusu uvumilivu ambayo pia yanatumika katika changamoto nje ya mashindano.";
-      const emb1 = await model(reference);
-      const emb2 = await model(userText);
+const emb1 = await modelInstance(reference);
+const emb2 = await modelInstance(userText);
       console.log("1")
       const vec1 = meanPooling(emb1);
       const vec2 = meanPooling(emb2);
@@ -979,9 +1012,7 @@ app.post("/Aloo", (req, res) => {
   res.json({ message: "Wozaaaa" });
 });
 
-server.listen(port, () => {
-  console.log(`Hello Rodger you app is running on port ${port}`);
-});
+
 
 // ---------- Upload Translation Task Route ----------
 app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
@@ -1087,28 +1118,4 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
 });
 
 
-// async function weTest(){
-//    const model = await loadModel();
-//            console.log(model)
 
-//       const reference = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.";
-//       const userText = "Michezo hufundisha nidhamu, kazi ya pamoja, na azimio. Wachezaji hufanya mazoezi mara kwa mara, hushinda vikwazo, na hujifunza masomo muhimu kuhusu uvumilivu ambayo pia yanatumika katika changamoto nje ya mashindano.";
-//       const emb1 = await model(reference);
-//       const emb2 = await model(userText);
-//       const vec1 = meanPooling(emb1);
-//       const vec2 = meanPooling(emb2);
-//       const semanticScore = cosineSimilarity(vec1, vec2) * 100;
-//       const grammarErr = await grammarErrors(userText);
-//       const grammarScore = Math.max(0, 100 - grammarErr * 10);
-//       const lenRatio =
-//         Math.min(reference.length, userText.length) /
-//         Math.max(reference.length, userText.length);
-//       const lengthScore = lenRatio * 100;
-
-//       let aiScore =
-//         semanticScore * 0.7 + grammarScore * 0.2 + lengthScore * 0.1;
-
-//       aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
-//       console.log("hi ndo score ya user "+ aiScore)
-// }
-// weTest()
