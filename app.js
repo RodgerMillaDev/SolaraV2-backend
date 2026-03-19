@@ -603,7 +603,6 @@ case "startTask":
   }
 
   if (data.taskType === "Content Translation") {
-     console.log("allooo")
     const key = `${data.uid}_${data.taskId}`;
     let timer;
 
@@ -614,6 +613,7 @@ case "startTask":
       }
 
       const model = await loadModel();
+           console.log("allooo")
 
       const reference = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.";
       const userText = "Michezo hufundisha nidhamu, kazi ya pamoja, na azimio. Wachezaji hufanya mazoezi mara kwa mara, hushinda vikwazo, na hujifunza masomo muhimu kuhusu uvumilivu ambayo pia yanatumika katika changamoto nje ya mashindano.";
