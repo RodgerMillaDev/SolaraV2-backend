@@ -85,10 +85,10 @@ function cosineSimilarity(a, b) {
 }
 
 // grammar check using LanguageTool
-async function grammarErrors(text) {
+async function grammarErrors() {
   const params = new URLSearchParams();
   params.append("text", text);
-  params.append("language", "de"); // change if needed
+  params.append("language", "en"); // change if needed
 
   const res = await fetch("https://api.languagetool.org/v2/check", {
     method: "POST",
@@ -98,7 +98,6 @@ async function grammarErrors(text) {
   const data = await res.json();
   return data.matches.length;
 }
-
 function meanPooling(tensor) {
   const data = tensor.data;
   const dims = tensor.dims;
@@ -648,8 +647,8 @@ case "startTask":
 
 
 
-      const reference = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.";
-      const userText = "Michezo hufundisha nidhamu, kazi ya pamoja, na azimio. Wachezaji hufanya mazoezi mara kwa mara, hushinda vikwazo, na hujifunza masomo muhimu kuhusu uvumilivu ambayo pia yanatumika katika changamoto nje ya mashindano.";
+      const reference = data.textotranslate ;
+      const userText = data.translatedText;
 const emb1 = await modelInstance(reference);
 const emb2 = await modelInstance(userText);
       console.log("1")
@@ -657,23 +656,19 @@ const emb2 = await modelInstance(userText);
       const vec2 = meanPooling(emb2);
             console.log("2")
 
-      const semanticScore = cosineSimilarity(vec1, vec2) * 100;
-      const grammarErr = await grammarErrors(userText);
-      const grammarScore = Math.max(0, 100 - grammarErr * 10);
-         console.log("3")
+const semanticScore = cosineSimilarity(vec1, vec2) * 100;
 
-      const lenRatio =
-        Math.min(reference.length, userText.length) /
-        Math.max(reference.length, userText.length);
-      const lengthScore = lenRatio * 100;
-         console.log("4")
+const lenRatio =
+  Math.min(reference.length, userText.length) /
+  Math.max(reference.length, userText.length);
 
+const lengthScore = lenRatio * 100;
 
-      let aiScore =
-        semanticScore * 0.7 + grammarScore * 0.2 + lengthScore * 0.1;
+let aiScore = semanticScore * 0.8 + lengthScore * 0.2;
 
-      aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
-      console.log("hi ndo score ya user "+ aiScore)
+aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+
+console.log("Score:", aiScore);
 
       const userRef = firestore.collection("Users").doc(data.uid);
       const taskRef = userRef
@@ -782,8 +777,8 @@ const emb2 = await modelInstance(userText);
         verdictScore = 50;
       }
 
-      const emb1 = await model(correctExplanation);
-      const emb2 = await model(userExplanation);
+      const emb1 = await modelInstance(correctExplanation);
+      const emb2 = await modelInstance(userExplanation);
 
       const vec1 = meanPooling(emb1);
       const vec2 = meanPooling(emb2);
