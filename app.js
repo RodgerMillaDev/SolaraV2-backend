@@ -37,6 +37,80 @@ const wss = new WebSocket.Server({ server });
 
 let userConnections = new Map(); // uid -> set of ws
 
+
+
+
+let extractor = null;
+
+// load model once
+async function loadModel() {
+  if (!extractor) {
+    const { pipeline } = await import("@xenova/transformers");
+
+    extractor = await pipeline(
+      "feature-extraction",
+      "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    );
+
+    console.log("Embedding model loaded");
+  }
+  return extractor;
+}
+
+// cosine similarity
+function cosineSimilarity(a, b) {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// grammar check using LanguageTool
+async function grammarErrors(text) {
+  const params = new URLSearchParams();
+  params.append("text", text);
+  params.append("language", "de"); // change if needed
+
+  const res = await fetch("https://api.languagetool.org/v2/check", {
+    method: "POST",
+    body: params,
+  });
+
+  const data = await res.json();
+  return data.matches.length;
+}
+
+function meanPooling(tensor) {
+  const data = tensor.data;
+  const dims = tensor.dims;
+
+  const tokens = dims[1];
+  const size = dims[2];
+
+  const embedding = new Array(size).fill(0);
+
+  for (let t = 0; t < tokens; t++) {
+    for (let i = 0; i < size; i++) {
+      embedding[i] += data[t * size + i];
+    }
+  }
+
+  for (let i = 0; i < size; i++) {
+    embedding[i] /= tokens;
+  }
+
+  return embedding;
+}
+
+
+
 // 1️⃣ GLOBAL TIMER REGISTRY
 const activeTaskTimers = new Map();
 
@@ -539,22 +613,17 @@ case "startTask":
         clearInterval(timer.intervalId);
       }
 
-      const reference = data.textotranslate;
-      const userText = data.translatedText;
-
       const model = await loadModel();
 
+      const reference = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.";
+      const userText = "Michezo hufundisha nidhamu, kazi ya pamoja, na azimio. Wachezaji hufanya mazoezi mara kwa mara, hushinda vikwazo, na hujifunza masomo muhimu kuhusu uvumilivu ambayo pia yanatumika katika changamoto nje ya mashindano.";
       const emb1 = await model(reference);
       const emb2 = await model(userText);
-
       const vec1 = meanPooling(emb1);
       const vec2 = meanPooling(emb2);
-
       const semanticScore = cosineSimilarity(vec1, vec2) * 100;
-
       const grammarErr = await grammarErrors(userText);
       const grammarScore = Math.max(0, 100 - grammarErr * 10);
-
       const lenRatio =
         Math.min(reference.length, userText.length) /
         Math.max(reference.length, userText.length);
@@ -564,6 +633,7 @@ case "startTask":
         semanticScore * 0.7 + grammarScore * 0.2 + lengthScore * 0.1;
 
       aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+      console.log("hi ndo score ya user "+ aiScore)
 
       const userRef = firestore.collection("Users").doc(data.uid);
       const taskRef = userRef
@@ -662,7 +732,6 @@ case "startTask":
       const correctExplanation = data.originalExplanation;
       const userExplanation = data.userExplanation;
 
-      const model = await loadModel();
 
       let verdictScore = 0;
 
@@ -1010,75 +1079,3 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
   }
 });
 
-let extractor = null;
-
-// load model once
-async function loadModel() {
-  if (!extractor) {
-    const { pipeline } = await import("@xenova/transformers");
-
-    extractor = await pipeline(
-      "feature-extraction",
-      "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
-    );
-
-    console.log("Embedding model loaded");
-  }
-  return extractor;
-}
-
-// cosine similarity
-function cosineSimilarity(a, b) {
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-// grammar check using LanguageTool
-async function grammarErrors(text) {
-  const params = new URLSearchParams();
-  params.append("text", text);
-  params.append("language", "de"); // change if needed
-
-  const res = await fetch("https://api.languagetool.org/v2/check", {
-    method: "POST",
-    body: params,
-  });
-
-  const data = await res.json();
-  return data.matches.length;
-}
-
-function meanPooling(tensor) {
-  const data = tensor.data;
-  const dims = tensor.dims;
-
-  const tokens = dims[1];
-  const size = dims[2];
-
-  const embedding = new Array(size).fill(0);
-
-  for (let t = 0; t < tokens; t++) {
-    for (let i = 0; i < size; i++) {
-      embedding[i] += data[t * size + i];
-    }
-  }
-
-  for (let i = 0; i < size; i++) {
-    embedding[i] /= tokens;
-  }
-
-  return embedding;
-}
-const alo={"type":"submitTask","taskId":"2WLvJOPKNYWJb4DtT4uI","taskType":"Content Translation","uid":"5wIYOw9dZtMihv3momhP5j18XYz2","textotranslate":"Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.","translatedText":"Michezo hufundisha nidhamu, kazi ya pamoja, na azimio. Wachezaji hufanya mazoezi mara kwa mara, hushinda vikwazo, na hujifunza masomo muhimu kuhusu uvumilivu ambayo pia yanatumika katika changamoto nje ya mashindano."}
-
-console.log(alo); // Should print "submitTask"
-console.log(alo.type); // Should print "submitTask"
