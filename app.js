@@ -85,7 +85,7 @@ function cosineSimilarity(a, b) {
 }
 
 // grammar check using LanguageTool
-async function grammarErrors() {
+async function grammarErrors(text) {
   const params = new URLSearchParams();
   params.append("text", text);
   params.append("language", "en"); // change if needed
