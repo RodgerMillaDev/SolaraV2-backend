@@ -613,21 +613,28 @@ case "startTask":
       }
 
       const model = await loadModel();
-           console.log("allooo")
+           console.log(model)
 
       const reference = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.";
       const userText = "Michezo hufundisha nidhamu, kazi ya pamoja, na azimio. Wachezaji hufanya mazoezi mara kwa mara, hushinda vikwazo, na hujifunza masomo muhimu kuhusu uvumilivu ambayo pia yanatumika katika changamoto nje ya mashindano.";
       const emb1 = await model(reference);
       const emb2 = await model(userText);
+      console.log("1")
       const vec1 = meanPooling(emb1);
       const vec2 = meanPooling(emb2);
+            console.log("2")
+
       const semanticScore = cosineSimilarity(vec1, vec2) * 100;
       const grammarErr = await grammarErrors(userText);
       const grammarScore = Math.max(0, 100 - grammarErr * 10);
+         console.log("3")
+
       const lenRatio =
         Math.min(reference.length, userText.length) /
         Math.max(reference.length, userText.length);
       const lengthScore = lenRatio * 100;
+         console.log("4")
+
 
       let aiScore =
         semanticScore * 0.7 + grammarScore * 0.2 + lengthScore * 0.1;
@@ -1079,3 +1086,29 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
   }
 });
 
+
+// async function weTest(){
+//    const model = await loadModel();
+//            console.log(model)
+
+//       const reference = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.";
+//       const userText = "Michezo hufundisha nidhamu, kazi ya pamoja, na azimio. Wachezaji hufanya mazoezi mara kwa mara, hushinda vikwazo, na hujifunza masomo muhimu kuhusu uvumilivu ambayo pia yanatumika katika changamoto nje ya mashindano.";
+//       const emb1 = await model(reference);
+//       const emb2 = await model(userText);
+//       const vec1 = meanPooling(emb1);
+//       const vec2 = meanPooling(emb2);
+//       const semanticScore = cosineSimilarity(vec1, vec2) * 100;
+//       const grammarErr = await grammarErrors(userText);
+//       const grammarScore = Math.max(0, 100 - grammarErr * 10);
+//       const lenRatio =
+//         Math.min(reference.length, userText.length) /
+//         Math.max(reference.length, userText.length);
+//       const lengthScore = lenRatio * 100;
+
+//       let aiScore =
+//         semanticScore * 0.7 + grammarScore * 0.2 + lengthScore * 0.1;
+
+//       aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+//       console.log("hi ndo score ya user "+ aiScore)
+// }
+// weTest()
