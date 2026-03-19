@@ -47,6 +47,7 @@ async function initModel() {
 
 server.listen(port, async () => {
   await initModel(); // run at server startup
+  await weRTest()
   console.log(`Hello Rodger you app is running on port ${port}`);
 });
 
@@ -649,12 +650,13 @@ case "startTask":
 
       const reference = data.textotranslate ;
       const userText = data.translatedText;
+      console.log("logged text")
+      console.log(userText)
+      console.log(reference)
 const emb1 = await modelInstance(reference);
 const emb2 = await modelInstance(userText);
-      console.log("1")
       const vec1 = meanPooling(emb1);
       const vec2 = meanPooling(emb2);
-            console.log("2")
 
 const semanticScore = cosineSimilarity(vec1, vec2) * 100;
 
@@ -1113,4 +1115,31 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
 });
 
 
+
+
+async function weRTest(){
+  
+      const reference = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition." ;
+      const userText = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.";
+const emb1 = await modelInstance(reference);
+const emb2 = await modelInstance(userText);
+      console.log("1")
+      const vec1 = meanPooling(emb1);
+      const vec2 = meanPooling(emb2);
+            console.log("2")
+
+const semanticScore = cosineSimilarity(vec1, vec2) * 100;
+
+const lenRatio =
+  Math.min(reference.length, userText.length) /
+  Math.max(reference.length, userText.length);
+
+const lengthScore = lenRatio * 100;
+
+let aiScore = semanticScore * 0.8 + lengthScore * 0.2;
+
+aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+
+console.log("Score:", aiScore);
+}
 
