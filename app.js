@@ -47,7 +47,6 @@ async function initModel() {
 
 server.listen(port, async () => {
   await initModel(); // run at server startup
-  await weRTest()
   console.log(`Hello Rodger you app is running on port ${port}`);
 });
 
@@ -82,7 +81,76 @@ function cosineSimilarity(a, b) {
     normB += b[i] * b[i];
   }
 
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+function normalize(vec) {
+  const norm = Math.sqrt(vec.reduce((sum, x) => sum + x * x, 0));
+  return norm === 0 ? vec : vec.map(x => x / norm);
+}
+
+function meanPooling(tensor) {
+  const data = tensor.data;
+  const [ , tokens, size ] = tensor.dims;
+
+  const embedding = new Array(size).fill(0);
+
+  for (let t = 0; t < tokens; t++) {
+    const offset = t * size;
+
+    for (let i = 0; i < size; i++) {
+      embedding[i] += data[offset + i];
+    }
+  }
+
+  for (let i = 0; i < size; i++) {
+    embedding[i] /= tokens;
+  }
+
+  return embedding;
+}
+async function weRTest(reference, userText, modelInstance){ 
+  const score = await scoreTexts(reference, userText, modelInstance);
+
+  return score;
+}
+async function scoreTexts(reference, userText, modelInstance) {
+  const emb1 = await modelInstance(reference);
+  const emb2 = await modelInstance(userText);
+
+  let vec1 = normalize(meanPooling(emb1));
+  let vec2 = normalize(meanPooling(emb2));
+
+  let semanticScore = cosineSimilarity(vec1, vec2) * 100;
+
+  const lenRatio =
+    Math.min(reference.length, userText.length) /
+    Math.max(reference.length, userText.length);
+
+  let lengthScore = lenRatio * 100;
+
+  // 🔥 CALIBRATION (this is the magic part)
+
+  // Boost weak but valid matches (cross-language sentences)
+  if (semanticScore > 2 && semanticScore < 50) {
+    semanticScore = semanticScore * 1.8 + 20;
+  }
+
+  // Prevent very low scores for meaningful translations
+  if (semanticScore < 30) {
+    semanticScore += 25;
+  }
+
+  // Clamp
+  semanticScore = Math.min(100, semanticScore);
+
+  // Weighted final score (meaning matters more)
+  let aiScore = semanticScore * 0.85 + lengthScore * 0.15;
+
+  aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+
+  return aiScore;
 }
 
 // grammar check using LanguageTool
@@ -98,27 +166,6 @@ async function grammarErrors(text) {
 
   const data = await res.json();
   return data.matches.length;
-}
-function meanPooling(tensor) {
-  const data = tensor.data;
-  const dims = tensor.dims;
-
-  const tokens = dims[1];
-  const size = dims[2];
-
-  const embedding = new Array(size).fill(0);
-
-  for (let t = 0; t < tokens; t++) {
-    for (let i = 0; i < size; i++) {
-      embedding[i] += data[t * size + i];
-    }
-  }
-
-  for (let i = 0; i < size; i++) {
-    embedding[i] /= tokens;
-  }
-
-  return embedding;
 }
 
 // 1️⃣ GLOBAL TIMER REGISTRY
@@ -616,8 +663,6 @@ case "startTask":
     const key = `${data.uid}_${data.taskId}`;
     let timer;
 
-
-
     try {
 
 
@@ -650,25 +695,9 @@ case "startTask":
 
       const reference = data.textotranslate ;
       const userText = data.translatedText;
-      console.log("logged text")
-      console.log(userText)
-      console.log(reference)
-const emb1 = await modelInstance(reference);
-const emb2 = await modelInstance(userText);
-      const vec1 = meanPooling(emb1);
-      const vec2 = meanPooling(emb2);
-
-const semanticScore = cosineSimilarity(vec1, vec2) * 100;
-
-const lenRatio =
-  Math.min(reference.length, userText.length) /
-  Math.max(reference.length, userText.length);
-
-const lengthScore = lenRatio * 100;
-
-let aiScore = semanticScore * 0.8 + lengthScore * 0.2;
-
-aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+      if (!reference || !userText) throw new Error("Invalid input");
+   
+let aiScore = await weRTest(reference, userText, modelInstance);
 
 console.log("Score:", aiScore);
 
@@ -690,7 +719,7 @@ console.log("Score:", aiScore);
         if (!taskSnap.exists || !userSnap.exists) return;
         if (taskSnap.data().status === "Completed") return;
 
-        if (aiScore >= 90) {
+        if (aiScore >= 75) {
           cash = parseInt(taskSnap.data().pay, 10) || 0;
           rewarded = true;
           status = "Completed";
@@ -1114,32 +1143,4 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
   }
 });
 
-
-
-
-async function weRTest(){
-  
-      const reference = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition." ;
-      const userText = "Sports teach discipline, teamwork, and determination. Athletes train consistently, overcome setbacks, and learn valuable lessons about perseverance that also apply to challenges outside competition.";
-const emb1 = await modelInstance(reference);
-const emb2 = await modelInstance(userText);
-      console.log("1")
-      const vec1 = meanPooling(emb1);
-      const vec2 = meanPooling(emb2);
-            console.log("2")
-
-const semanticScore = cosineSimilarity(vec1, vec2) * 100;
-
-const lenRatio =
-  Math.min(reference.length, userText.length) /
-  Math.max(reference.length, userText.length);
-
-const lengthScore = lenRatio * 100;
-
-let aiScore = semanticScore * 0.8 + lengthScore * 0.2;
-
-aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
-
-console.log("Score:", aiScore);
-}
 
