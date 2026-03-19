@@ -409,7 +409,6 @@ case "startTask":
 
   break;
   case "submitTask":
-           console.log("this is the task type: " + data.taskType)
 
   if (!data.uid || !data.taskId || !data.taskType) break;
 
@@ -530,6 +529,7 @@ case "startTask":
   }
 
   if (data.taskType === "Content Translation") {
+     console.log("allooo")
     const key = `${data.uid}_${data.taskId}`;
     let timer;
 
