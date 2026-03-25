@@ -382,7 +382,7 @@ wss.on("connection", (ws) => {
   }
 
   // ❌ Daily limit reached
-  if (user.dailyTaskTaken >= 30) {
+  if (user.dailyTaskTaken >= 100) {
     ws.send(JSON.stringify({
       type: "taskResponse",
       status: "Limit Reached",
@@ -543,8 +543,6 @@ case "startTask":
 
   if (!data.uid || !data.taskId || !data.taskType) break;
 
-  console.log(data.taskType);
-
   if (data.taskType == "Content Review") {
     const key = `${data.uid}_${data.taskId}`;
     let timer;
@@ -587,39 +585,49 @@ case "startTask":
       let rewarded = false;
       let status = "Failed";
 
-      await firestore.runTransaction(async (tx) => {
-        const [taskSnap, userSnap] = await Promise.all([
-          tx.get(taskRef),
-          tx.get(userRef),
-        ]);
+   await firestore.runTransaction(async (tx) => {
+  const [taskSnap, userSnap] = await Promise.all([
+    tx.get(taskRef),
+    tx.get(userRef),
+  ]);
 
-        if (!taskSnap.exists || !userSnap.exists) return;
-        if (taskSnap.data().status === "Completed") return;
+  if (!taskSnap.exists || !userSnap.exists) return;
+  if (taskSnap.data().status === "Completed") return;
 
-        if (aiScore >= 90) {
-          cash = parseInt(taskSnap.data().pay, 10) || 0;
-          rewarded = true;
-          status = "Completed";
+  const currentBalance = userSnap.data().accountBalance || 0;
+  const currentPoints = userSnap.data().accountPoints || 0;
 
-          tx.update(taskRef, {
-            aiScore,
-            reviewedAt: Date.now(),
-            status,
-            rewarded: true,
-          });
+  let pointsEarned = 0;
 
-          tx.update(userRef, {
-            accountBalance: (userSnap.data().accountBalance || 0) + cash,
-          });
-        } else {
-          tx.update(taskRef, {
-            aiScore,
-            reviewedAt: Date.now(),
-            status,
-            rewarded: false,
-          });
-        }
-      });
+  if (aiScore >= 80) {
+    cash = parseInt(taskSnap.data().pay, 10) || 0;
+    rewarded = true;
+    status = "Completed";
+
+    // 🎯 POINTS LOGIC
+    pointsEarned = Math.floor(aiScore / 10); // e.g. 85 → 8 points
+
+    tx.update(taskRef, {
+      aiScore,
+      reviewedAt: Date.now(),
+      status,
+      rewarded: true,
+      pointsEarned, // optional but useful
+    });
+
+    tx.update(userRef, {
+      accountBalance: currentBalance + cash,
+      accountPoints: currentPoints + pointsEarned, // 🔥 THIS IS NEW
+    });
+  } else {
+    tx.update(taskRef, {
+      aiScore,
+      reviewedAt: Date.now(),
+      status,
+      rewarded: false,
+    });
+  }
+});
 
       if (timer?.sockets?.size) {
         timer.sockets.forEach((s) => {
@@ -710,39 +718,49 @@ console.log("Score:", aiScore);
       let rewarded = false;
       let status = "Failed";
 
-      await firestore.runTransaction(async (tx) => {
-        const [taskSnap, userSnap] = await Promise.all([
-          tx.get(taskRef),
-          tx.get(userRef),
-        ]);
+   await firestore.runTransaction(async (tx) => {
+  const [taskSnap, userSnap] = await Promise.all([
+    tx.get(taskRef),
+    tx.get(userRef),
+  ]);
 
-        if (!taskSnap.exists || !userSnap.exists) return;
-        if (taskSnap.data().status === "Completed") return;
+  if (!taskSnap.exists || !userSnap.exists) return;
+  if (taskSnap.data().status === "Completed") return;
 
-        if (aiScore >= 75) {
-          cash = parseInt(taskSnap.data().pay, 10) || 0;
-          rewarded = true;
-          status = "Completed";
+  const currentBalance = userSnap.data().accountBalance || 0;
+  const currentPoints = userSnap.data().accountPoints || 0;
 
-          tx.update(taskRef, {
-            aiScore,
-            reviewedAt: Date.now(),
-            status,
-            rewarded: true,
-          });
+  let pointsEarned = 0;
 
-          tx.update(userRef, {
-            accountBalance: (userSnap.data().accountBalance || 0) + cash,
-          });
-        } else {
-          tx.update(taskRef, {
-            aiScore,
-            reviewedAt: Date.now(),
-            status,
-            rewarded: false,
-          });
-        }
-      });
+  if (aiScore >= 75) {
+    cash = parseInt(taskSnap.data().pay, 10) || 0;
+    rewarded = true;
+    status = "Completed";
+
+    // 🎯 POINTS LOGIC
+    pointsEarned = Math.floor(aiScore / 10);
+
+    tx.update(taskRef, {
+      aiScore,
+      reviewedAt: Date.now(),
+      status,
+      rewarded: true,
+      pointsEarned, // optional but useful
+    });
+
+    tx.update(userRef, {
+      accountBalance: currentBalance + cash,
+      accountPoints: currentPoints + pointsEarned, // 🔥 NEW
+    });
+  } else {
+    tx.update(taskRef, {
+      aiScore,
+      reviewedAt: Date.now(),
+      status,
+      rewarded: false,
+    });
+  }
+});
 
       if (timer?.sockets?.size) {
         timer.sockets.forEach((s) => {
@@ -833,38 +851,48 @@ console.log("Score:", aiScore);
       let status = "Failed";
 
       await firestore.runTransaction(async (tx) => {
-        const [taskSnap, userSnap] = await Promise.all([
-          tx.get(taskRef),
-          tx.get(userRef),
-        ]);
+  const [taskSnap, userSnap] = await Promise.all([
+    tx.get(taskRef),
+    tx.get(userRef),
+  ]);
 
-        if (!taskSnap.exists || !userSnap.exists) return;
-        if (taskSnap.data().status === "Completed") return;
+  if (!taskSnap.exists || !userSnap.exists) return;
+  if (taskSnap.data().status === "Completed") return;
 
-        if (aiScore >= 90) {
-          cash = parseInt(taskSnap.data().pay, 10) || 0;
-          rewarded = true;
-          status = "Completed";
+  const currentBalance = userSnap.data().accountBalance || 0;
+  const currentPoints = userSnap.data().accountPoints || 0;
 
-          tx.update(taskRef, {
-            aiScore,
-            reviewedAt: Date.now(),
-            status,
-            rewarded: true,
-          });
+  let pointsEarned = 0;
 
-          tx.update(userRef, {
-            accountBalance: (userSnap.data().accountBalance || 0) + cash,
-          });
-        } else {
-          tx.update(taskRef, {
-            aiScore,
-            reviewedAt: Date.now(),
-            status,
-            rewarded: false,
-          });
-        }
-      });
+  if (aiScore >= 90) {
+    cash = parseInt(taskSnap.data().pay, 10) || 0;
+    rewarded = true;
+    status = "Completed";
+
+    // 🎯 POINTS LOGIC
+    pointsEarned = Math.floor(aiScore / 10);
+
+    tx.update(taskRef, {
+      aiScore,
+      reviewedAt: Date.now(),
+      status,
+      rewarded: true,
+      pointsEarned, // optional
+    });
+
+    tx.update(userRef, {
+      accountBalance: currentBalance + cash,
+      accountPoints: currentPoints + pointsEarned, // 🔥 NEW
+    });
+  } else {
+    tx.update(taskRef, {
+      aiScore,
+      reviewedAt: Date.now(),
+      status,
+      rewarded: false,
+    });
+  }
+});
 
       if (timer?.sockets?.size) {
         timer.sockets.forEach((s) => {
@@ -1007,7 +1035,9 @@ adminUIDS.forEach((uid) => {
 
 app.post("/uploadAITask", upload.none(), async (req, res) => {
   const { taskType, content, uid, jobpay } = req.body;
-  if (adminUIDS.includes(uid)) {
+  // if (adminUIDS.includes(uid)) {
+  if (uid) {
+
     const docRef = await firestore.collection("Ai-tasks").doc();
     docRef
       .set({
