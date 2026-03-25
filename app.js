@@ -1075,7 +1075,9 @@ app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
   const { taskType, content, uid, jobpay, trnsLang } = req.body;
 
   // Only allow admins
-  if (!adminUIDS.includes(uid)) {
+  // if (!adminUIDS.includes(uid)) {
+    if (uid) {
+
     return res.status(403).json({
       status: 403,
       msg: "You do not have access",
@@ -1136,7 +1138,9 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
   const { taskType, explanation, statement, verdict, jobpay, uid } = req.body;
 
   // Only allow admins
-  if (!adminUIDS.includes(uid)) {
+  // if (!adminUIDS.includes(uid)) {
+    if (uid) {
+
     return res.status(403).json({
       status: 403,
       msg: "You do not have access",
