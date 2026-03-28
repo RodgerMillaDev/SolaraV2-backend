@@ -484,7 +484,7 @@ wss.on("connection", (ws) => {
 case "startTask":
   if (!data.userId || !data.taskId) break;
 
-  const duration = 300; // seconds
+  const duration = 900; // seconds
 
   const taskRef = firestore
     .collection("Users")
@@ -537,6 +537,7 @@ case "startTask":
       }),
     );
   }
+
 
   break;
   case "submitTask":
@@ -992,8 +993,48 @@ console.log("Score:", aiScore);
 
   break;
 
+ case "startScreeningTimer":
+  if (!data.userId || !data.testId) break;
+
+  const durationScreen = 900; // 15 minutes in seconds
+
+  try {
+    const userRef = firestore.collection("Users").doc(data.userId);
+    const testRef = userRef.collection("screeningTests").doc(data.testId);
+
+    await testRef.set({
+      startedAt: serverTimestamp(),
+      durationSec: duration,
+      status: "active",
+    });
+
+    const snap = await testRef.get();
+    const startedAt = snap.data().startedAt.toMillis();
+
+    startScreeningTimer({
+      ws,
+      userId: data.userId,
+      testId: data.testId,
+      durationScreen,
+      startedAt,
+    });
+
+    ws.send(JSON.stringify({
+      type: "screeningTimerStarted",
+      remainingTime: duration,
+    }));
+
+  } catch (error) {
+    console.error("Screening timer error:", error);
+    ws.send(JSON.stringify({
+      type: "screeningTimerError",
+      error: error.message,
+    }));
+  }
+  break;
+  
+
 }
-     
     
 
    
@@ -1067,8 +1108,6 @@ app.post("/uploadAITask", upload.none(), async (req, res) => {
 app.post("/Aloo", (req, res) => {
   res.json({ message: "Wozaaaa" });
 });
-
-
 
 // ---------- Upload Translation Task Route ----------
 app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
@@ -1178,3 +1217,57 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
 });
 
 
+const activeScreeningTimers = new Map();
+
+const startScreeningTimer = ({ ws, userId, testId, duration, startedAt }) => {
+  const key = `${userId}_${testId}`;
+
+  if (activeScreeningTimers.has(key)) {
+    activeScreeningTimers.get(key).sockets.add(ws);
+    return;
+  }
+
+  const sockets = new Set([ws]);
+
+  const intervalId = setInterval(async () => {
+    try {
+      const now = Date.now();
+      const elapsed = Math.floor((now - startedAt) / 1000);
+      const remaining = duration - elapsed;
+
+      sockets.forEach((s) => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(JSON.stringify({
+            type: "screeningTimerUpdate",
+            remainingTime: remaining,
+          }));
+        }
+      });
+
+      if (remaining <= 0) {
+        clearInterval(intervalId);
+        activeScreeningTimers.delete(key);
+
+        const testRef = firestore
+          .collection("Users")
+          .doc(userId)
+          .collection("screeningTests")
+          .doc(testId);
+
+        await testRef.update({ status: "expired" });
+
+        sockets.forEach((s) => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(JSON.stringify({
+              type: "screeningTimeExpired",
+            }));
+          }
+        });
+      }
+    } catch (err) {
+      console.error("Screening timer error:", err);
+    }
+  }, 1000);
+
+  activeScreeningTimers.set(key, { intervalId, sockets, duration, startedAt });
+};
