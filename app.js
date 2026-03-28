@@ -170,9 +170,61 @@ async function grammarErrors(text) {
 
 // 1️⃣ GLOBAL TIMER REGISTRY
 const activeTaskTimers = new Map();
+// Add this with your other maps
+const activeScreeningTimers = new Map();
 
-// 2️⃣ TIMER FUNCTION (GOES HERE)
-// key = `${userId}_${taskId}`, value = { intervalId, sockets: Set<WebSocket>, duration, startedAt }
+const startScreeningTimer = ({ ws, userId, testId, duration, startedAt }) => {
+  const key = `${userId}_${testId}`;
+
+  if (activeScreeningTimers.has(key)) {
+    activeScreeningTimers.get(key).sockets.add(ws);
+    return;
+  }
+
+  const sockets = new Set([ws]);
+
+  const intervalId = setInterval(async () => {
+    try {
+      const now = Date.now();
+      const elapsed = Math.floor((now - startedAt) / 1000);
+      const remaining = duration - elapsed;
+
+      sockets.forEach((s) => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(JSON.stringify({
+            type: "screeningTimerUpdate",
+            remainingTime: remaining,
+          }));
+        }
+      });
+
+      if (remaining <= 0) {
+        clearInterval(intervalId);
+        activeScreeningTimers.delete(key);
+
+        const testRef = firestore
+          .collection("Users")
+          .doc(userId)
+          .collection("screeningTests")
+          .doc(testId);
+
+        await testRef.update({ status: "expired" });
+
+        sockets.forEach((s) => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(JSON.stringify({
+              type: "screeningTimeExpired",
+            }));
+          }
+        });
+      }
+    } catch (err) {
+      console.error("Screening timer error:", err);
+    }
+  }, 1000);
+
+  activeScreeningTimers.set(key, { intervalId, sockets, duration, startedAt });
+};
 
 const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
   const key = `${userId}_${taskId}`;
@@ -993,36 +1045,74 @@ console.log("Score:", aiScore);
 
   break;
 
- case "startScreeningTimer":
+case "startScreeningTimer":
   if (!data.userId || !data.testId) break;
 
-  const durationScreen = 900; // 15 minutes in seconds
+  const durationScreen = 900; // 15 minutes
 
   try {
     const userRef = firestore.collection("Users").doc(data.userId);
     const testRef = userRef.collection("screeningTests").doc(data.testId);
 
-    await testRef.set({
-      startedAt: serverTimestamp(),
-      durationSec: duration,
-      status: "active",
-    });
+    // Check if timer already exists
+    const existingTimer = activeScreeningTimers.get(`${data.userId}_${data.testId}`);
+    if (existingTimer) {
+      existingTimer.sockets.add(ws);
+      ws.send(JSON.stringify({
+        type: "screeningTimerUpdate",
+        remainingTime: existingTimer.remaining,
+      }));
+      break;
+    }
 
-    const snap = await testRef.get();
-    const startedAt = snap.data().startedAt.toMillis();
+    // Get or create test document
+    const testSnap = await testRef.get();
+    let startedAt;
 
-    startScreeningTimer({
-      ws,
-      userId: data.userId,
-      testId: data.testId,
-      durationScreen,
-      startedAt,
-    });
+    if (testSnap.exists && testSnap.data().startedAt) {
+      startedAt = testSnap.data().startedAt.toMillis();
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const remaining = Math.max(durationScreen - elapsed, 0);
 
-    ws.send(JSON.stringify({
-      type: "screeningTimerStarted",
-      remainingTime: duration,
-    }));
+      if (remaining <= 0) {
+        ws.send(JSON.stringify({ type: "screeningTimeExpired" }));
+        break;
+      }
+
+      ws.send(JSON.stringify({
+        type: "screeningTimerUpdate",
+        remainingTime: remaining,
+      }));
+
+      startScreeningTimer({
+        ws,
+        userId: data.userId,
+        testId: data.testId,
+        durationScreen,
+        startedAt,
+      });
+    } else {
+      // New test - create record
+      startedAt = Date.now();
+      await testRef.set({
+        startedAt: admin.firestore.Timestamp.fromMillis(startedAt),
+        durationSec: durationScreen,
+        status: "active",
+      });
+
+      ws.send(JSON.stringify({
+        type: "screeningTimerStarted",
+        remainingTime: duration,
+      }));
+
+      startScreeningTimer({
+        ws,
+        userId: data.userId,
+        testId: data.testId,
+        durationScreen,
+        startedAt,
+      });
+    }
 
   } catch (error) {
     console.error("Screening timer error:", error);
@@ -1032,7 +1122,6 @@ console.log("Score:", aiScore);
     }));
   }
   break;
-  
 
 }
     
@@ -1217,57 +1306,4 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
 });
 
 
-const activeScreeningTimers = new Map();
 
-const startScreeningTimer = ({ ws, userId, testId, duration, startedAt }) => {
-  const key = `${userId}_${testId}`;
-
-  if (activeScreeningTimers.has(key)) {
-    activeScreeningTimers.get(key).sockets.add(ws);
-    return;
-  }
-
-  const sockets = new Set([ws]);
-
-  const intervalId = setInterval(async () => {
-    try {
-      const now = Date.now();
-      const elapsed = Math.floor((now - startedAt) / 1000);
-      const remaining = duration - elapsed;
-
-      sockets.forEach((s) => {
-        if (s.readyState === WebSocket.OPEN) {
-          s.send(JSON.stringify({
-            type: "screeningTimerUpdate",
-            remainingTime: remaining,
-          }));
-        }
-      });
-
-      if (remaining <= 0) {
-        clearInterval(intervalId);
-        activeScreeningTimers.delete(key);
-
-        const testRef = firestore
-          .collection("Users")
-          .doc(userId)
-          .collection("screeningTests")
-          .doc(testId);
-
-        await testRef.update({ status: "expired" });
-
-        sockets.forEach((s) => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(JSON.stringify({
-              type: "screeningTimeExpired",
-            }));
-          }
-        });
-      }
-    } catch (err) {
-      console.error("Screening timer error:", err);
-    }
-  }, 1000);
-
-  activeScreeningTimers.set(key, { intervalId, sockets, duration, startedAt });
-};
