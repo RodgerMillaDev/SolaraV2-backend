@@ -1056,11 +1056,10 @@ case "startScreeningTimer":
     if (activeScreeningTimers.has(key)) {
       const existing = activeScreeningTimers.get(key);
       existing.sockets.add(ws);
-      
       const now = Date.now();
       const elapsed = Math.floor((now - existing.startedAt) / 1000);
       const remaining = Math.max(durationScreen - elapsed, 0);
-      
+    
       ws.send(JSON.stringify({
         type: "screeningTimerUpdate",
         remainingTime: remaining,
@@ -1109,6 +1108,48 @@ case "startScreeningTimer":
     console.error("Screening timer error:", error);
   }
   break;
+
+  case "screeningComplete":
+  if (!data.userId) break;
+
+  try {
+    const userRef = firestore.collection("Users").doc(data.userId);
+    
+    await userRef.update({
+      screeningCompleted: true,
+      screeningScore: data.score,
+      screeningTotal: data.totalQuestions,
+      screeningPercentage: data.percentage,
+      screeningPassed: data.passed,
+      screeningCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
+      screenCount: admin.firestore.FieldValue.increment(1),
+      screeningExpired: data.timeExpired || false,
+    });
+    
+    // Clean up timer if exists
+    const key = `screening_${data.userId}`;
+    if (activeScreeningTimers.has(key)) {
+      const timer = activeScreeningTimers.get(key);
+      clearInterval(timer.intervalId);
+      activeScreeningTimers.delete(key);
+    }
+    
+    ws.send(JSON.stringify({
+      type: "screeningCompleteConfirm",
+      success: true,
+    }));
+    
+    console.log(`Screening complete for ${data.userId}: ${data.score}/${data.totalQuestions} (${data.passed ? "PASS" : "FAIL"})`);
+    
+  } catch (error) {
+    console.error("Error saving screening results:", error);
+    ws.send(JSON.stringify({
+      type: "screeningCompleteError",
+      error: error.message,
+    }));
+  }
+  break;
+
 }
     
 
