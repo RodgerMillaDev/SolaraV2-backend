@@ -1046,83 +1046,69 @@ console.log("Score:", aiScore);
   break;
 
 case "startScreeningTimer":
-  if (!data.userId || !data.testId) break;
+  if (!data.userId) break;
 
   const durationScreen = 900; // 15 minutes
+  const key = `screening_${data.userId}`;
 
   try {
-    const userRef = firestore.collection("Users").doc(data.userId);
-    const testRef = userRef.collection("screeningTests").doc(data.testId);
-
     // Check if timer already exists
-    const existingTimer = activeScreeningTimers.get(`${data.userId}_${data.testId}`);
-    if (existingTimer) {
-      existingTimer.sockets.add(ws);
-      ws.send(JSON.stringify({
-        type: "screeningTimerUpdate",
-        remainingTime: existingTimer.remaining,
-      }));
-      break;
-    }
-
-    // Get or create test document
-    const testSnap = await testRef.get();
-    let startedAt;
-
-    if (testSnap.exists && testSnap.data().startedAt) {
-      startedAt = testSnap.data().startedAt.toMillis();
-      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    if (activeScreeningTimers.has(key)) {
+      const existing = activeScreeningTimers.get(key);
+      existing.sockets.add(ws);
+      
+      const now = Date.now();
+      const elapsed = Math.floor((now - existing.startedAt) / 1000);
       const remaining = Math.max(durationScreen - elapsed, 0);
-
-      if (remaining <= 0) {
-        ws.send(JSON.stringify({ type: "screeningTimeExpired" }));
-        break;
-      }
-
+      
       ws.send(JSON.stringify({
         type: "screeningTimerUpdate",
         remainingTime: remaining,
       }));
-
-      startScreeningTimer({
-        ws,
-        userId: data.userId,
-        testId: data.testId,
-        durationScreen,
-        startedAt,
-      });
-    } else {
-      // New test - create record
-      startedAt = Date.now();
-      await testRef.set({
-        startedAt: admin.firestore.Timestamp.fromMillis(startedAt),
-        durationSec: durationScreen,
-        status: "active",
-      });
-
-      ws.send(JSON.stringify({
-        type: "screeningTimerStarted",
-        remainingTime: duration,
-      }));
-
-      startScreeningTimer({
-        ws,
-        userId: data.userId,
-        testId: data.testId,
-        durationScreen,
-        startedAt,
-      });
+      break;
     }
 
+    // Start new timer
+    const startedAt = Date.now();
+    const sockets = new Set([ws]);
+    
+    const intervalId = setInterval(() => {
+      const now = Date.now();
+      const elapsed = Math.floor((now - startedAt) / 1000);
+      const remaining = durationScreen - elapsed;
+      
+      sockets.forEach((s) => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(JSON.stringify({
+            type: "screeningTimerUpdate",
+            remainingTime: remaining,
+          }));
+        }
+      });
+      
+      if (remaining <= 0) {
+        clearInterval(intervalId);
+        activeScreeningTimers.delete(key);
+        
+        sockets.forEach((s) => {
+          if (s.readyState === WebSocket.OPEN) {
+            s.send(JSON.stringify({ type: "screeningTimeExpired" }));
+          }
+        });
+      }
+    }, 1000);
+    
+    activeScreeningTimers.set(key, { intervalId, sockets, startedAt });
+    
+    ws.send(JSON.stringify({
+      type: "screeningTimerStarted",
+      remainingTime: duration,
+    }));
+    
   } catch (error) {
     console.error("Screening timer error:", error);
-    ws.send(JSON.stringify({
-      type: "screeningTimerError",
-      error: error.message,
-    }));
   }
   break;
-
 }
     
 
