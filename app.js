@@ -1193,7 +1193,13 @@ adminUIDS.forEach((uid) => {
 app.post("/uploadAITask", upload.none(), async (req, res) => {
   const { taskType, content, uid, jobpay } = req.body;
   // if (adminUIDS.includes(uid)) {
-  if (!uid) {
+    if (!uid) {
+
+    return res.status(403).json({
+      status: 403,
+      msg: "You do not have access",
+    });
+  }
 
     const docRef = await firestore.collection("Ai-tasks").doc();
     docRef
@@ -1213,12 +1219,7 @@ app.post("/uploadAITask", upload.none(), async (req, res) => {
       .catch(() => {
         res.json({ msg: "Error uploading task", status: 300 });
       });
-  } else {
-    return res.status(403).json({
-      status: 403,
-      msg: "You do not have access",
-    });
-  }
+  
 });
 
 app.post("/Aloo", (req, res) => {
