@@ -1335,3 +1335,37 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
 
 
 
+
+
+app.post("/uploadJob", upload.none(), async (req, res) => {
+  const { jobCat, jobName, jobReq,jobDesc,jobPay,uid } = req.body;
+  // if (adminUIDS.includes(uid)) {
+    if (!uid) {
+
+    return res.status(403).json({
+      status: 403,
+      msg: "You do not have access",
+    });
+  }
+
+   try {
+    const docRef = firestore.collection("Jobs").doc();
+
+    await docRef.set({
+      jobID: docRef.id,
+      jobCat,
+      jobName,
+      jobminiTtile:jobCat,
+      jobReq,
+      jobDesc,
+      jobNameLowerCase: jobName.toLowerCase(),
+      jobPay: Number(jobPay),
+      status: "active",
+    });
+
+    res.json({ msg: "Job uploaded", status: 200 });
+  } catch (err) {
+    res.json({ msg: "Error uploading Job", status: 300 });
+  }
+    
+});
