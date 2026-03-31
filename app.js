@@ -7,6 +7,7 @@ const port = 3322;
 const app = express();
 const admin = require("firebase-admin");
 const deepl = require("deepl-node");
+
 const {
   firestore,
   serverTimestamp,
@@ -1368,4 +1369,145 @@ app.post("/uploadJob", upload.none(), async (req, res) => {
     res.json({ msg: "Error uploading Job", status: 300 });
   }
     
+});
+
+app.post("/withdrawRequest", upload.none(), async (req, res) => {
+  try {
+    // 🔐 1. Verify Firebase Auth Token
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({
+        status: 401,
+        msg: "Unauthorized: No token",
+      });
+    }
+
+    const token = authHeader.split("Bearer ")[1];
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    const uid = decodedToken.uid;
+
+    // 📦 2. Get data (IGNORE uid & name from frontend)
+    const { amount } = req.body;
+
+    if (!amount) {
+      return res.status(400).json({
+        status: 400,
+        msg: "Amount is required",
+      });
+    }
+
+    const withdrawAmount = Number(amount);
+
+    // 🧪 3. Validate amount
+    if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
+      return res.status(400).json({
+        status: 400,
+        msg: "Invalid amount",
+      });
+    }
+
+    if (withdrawAmount < 30) {
+      return res.status(400).json({
+        status: 400,
+        msg: "Minimum withdrawal is $30",
+      });
+    }
+
+    if (withdrawAmount > 10000) {
+      return res.status(400).json({
+        status: 400,
+        msg: "Maximum withdrawal is $10,000",
+      });
+    }
+
+    // 🧾 4. Get user from Firestore
+    const userRef = firestore.collection("Users").doc(uid);
+    const userSnap = await userRef.get();
+
+    if (!userSnap.exists) {
+      return res.status(404).json({
+        status: 404,
+        msg: "User not found",
+      });
+    }
+
+    const userData = userSnap.data();
+
+    // 💰 5. Check balance
+    if (!userData.accountBalance || userData.accountBalance < withdrawAmount) {
+      return res.status(403).json({
+        status: 403,
+        msg: "Insufficient balance",
+      });
+    }
+
+    // ⏱️ 6. Cooldown protection (1 minute)
+    if (userData.lastWithdrawAt) {
+      const now = Date.now();
+      const last = userData.lastWithdrawAt.toMillis();
+
+      if (now - last < 60000) {
+        return res.status(429).json({
+          status: 429,
+          msg: "Please wait before another withdrawal",
+        });
+      }
+    }
+
+    // 🚫 7. Prevent duplicate pending requests
+    const existingRequest = await firestore
+      .collection("WithdrawRequests")
+      .where("uid", "==", uid)
+      .where("status", "==", "pending")
+      .limit(1)
+      .get();
+
+    if (!existingRequest.empty) {
+      return res.status(409).json({
+        status: 409,
+        msg: "You already have a pending withdrawal",
+      });
+    }
+
+    // 📝 8. Create withdrawal request
+    await firestore.collection("WithdrawRequests").add({
+      uid,
+      name: userData.name, // ✅ always from DB
+      amount: withdrawAmount,
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    const transactionRef = firestore
+  .collection("Users")
+  .doc(uid)
+  .collection("transactions")
+  .doc();
+
+await transactionRef.set({
+  amount: withdrawAmount,
+  type: "withdrawal",
+  status: "pending",
+  createdAt: admin.firestore.FieldValue.serverTimestamp(),
+});
+
+    // 🕒 9. Update cooldown timestamp
+    await userRef.update({
+      lastWithdrawAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // ✅ Success
+    return res.status(200).json({
+      status: 200,
+      msg: "Withdrawal request submitted",
+    });
+
+  } catch (error) {
+    console.error("Withdraw error:", error);
+
+    return res.status(500).json({
+      status: 500,
+      msg: "Server error",
+    });
+  }
 });
