@@ -25,6 +25,27 @@ const upload = multer({
   storage: multer.memoryStorage(),
 });
 
+const checkAndSetCooldown = async (userId) => {
+  const userRef = firestore.collection("Users").doc(userId);
+  const tasksRef = userRef.collection("assignedTasks");
+  
+  const pendingTasks = await tasksRef.where("status", "in", ["active", "Pending"]).get();
+  
+  if (pendingTasks.empty) {
+    const cooldownHours = 2;
+    const cooldownUntil = new Date(Date.now() + cooldownHours * 60 * 60 * 1000);
+    
+    await userRef.update({
+      taskCooldownUntil: admin.firestore.Timestamp.fromDate(cooldownUntil),
+      lastTaskBatchCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
+      hasTasks: false,
+    });
+    
+    return { cooldownUntil, cooldownHours };
+  }
+  return null;
+};
+
 const authKey = process.env.TRANSLATE_AUTHKEY; // replace with your key
 const translator = new deepl.Translator(authKey);
 async function translateTxt(content, trnsLang) {
@@ -406,23 +427,23 @@ wss.on("connection", (ws) => {
     }
 
     break;
-    case "requestTask":
+case "requestTask":
   if (!data.uid) return;
 
   const userRef = firestore.collection("Users").doc(data.uid);
   const userSnap = await userRef.get();
 
-  // ❌ User does not exist
   if (!userSnap.exists) {
     ws.send(JSON.stringify({
       type: "taskResponse",
       status: "Error",
-      reason: "An error occured. Try again later.",
+      reason: "An error occurred. Try again later.",
     }));
     break;
   }
 
   const user = userSnap.data();
+  const now = Date.now();
 
   // ❌ Not eligible
   if (!user.jobEligibility) {
@@ -430,6 +451,29 @@ wss.on("connection", (ws) => {
       type: "taskResponse",
       status: "Not Eligible",
       reason: "You are not eligible for tasks at the moment.",
+    }));
+    break;
+  }
+
+  // ✅ NEW: Check if user is in cooldown
+  if (user.taskCooldownUntil && user.taskCooldownUntil.toMillis() > now) {
+    const remainingMinutes = Math.ceil((user.taskCooldownUntil.toMillis() - now) / 60000);
+    const remainingHours = Math.floor(remainingMinutes / 60);
+    const remainingMins = remainingMinutes % 60;
+    
+    let timeMessage = "";
+    if (remainingHours > 0) {
+      timeMessage = `${remainingHours} hour${remainingHours > 1 ? 's' : ''}`;
+      if (remainingMins > 0) timeMessage += ` and ${remainingMins} minute${remainingMins > 1 ? 's' : ''}`;
+    } else {
+      timeMessage = `${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}`;
+    }
+    
+    ws.send(JSON.stringify({
+      type: "taskResponse",
+      status: "Cooldown",
+      reason: `New tasks available in ${timeMessage}. Complete your current tasks first!`,
+      remainingTime: user.taskCooldownUntil.toMillis() - now,
     }));
     break;
   }
@@ -454,7 +498,7 @@ wss.on("connection", (ws) => {
     break;
   }
 
-  // ✅ USER IS ELIGIBLE → FETCH TASK
+  // ✅ USER IS ELIGIBLE → FETCH TASKS
   const taskQuery = await firestore
     .collection("Ai-tasks")
     .where("status", "==", "active")
@@ -471,25 +515,22 @@ wss.on("connection", (ws) => {
   }
 
   let assignedTasks = [];
-
   const availableTasks = taskQuery.docs.map((doc) => ({
     taskId: doc.id,
     ...doc.data(),
   }));
 
-  const tasksToAssign = availableTasks.slice(0, 4);
+  const BATCH_SIZE = 5; // ✅ 5 tasks per batch
+  const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
 
   await admin.firestore().runTransaction(async (tx) => {
-    // update user once
     tx.update(userRef, {
-      dailyTaskTaken: admin.firestore.FieldValue.increment(
-        tasksToAssign.length
-      ),
+      dailyTaskTaken: admin.firestore.FieldValue.increment(tasksToAssign.length),
+      // ✅ Set cooldown for after tasks are completed (will be updated when tasks finish)
     });
 
     for (const task of tasksToAssign) {
       const taskRef = firestore.collection("Ai-tasks").doc(task.taskId);
-
       tx.update(taskRef, {
         assignCount: admin.firestore.FieldValue.increment(1),
         assignedTo: data.uid,
@@ -506,9 +547,8 @@ wss.on("connection", (ws) => {
     }
   });
 
-  // ✅ Save tasks in batch
+  // Save tasks in batch
   const batch = firestore.batch();
-
   for (const task of assignedTasks) {
     const taskRef = firestore
       .collection("Users")
@@ -524,17 +564,25 @@ wss.on("connection", (ws) => {
       instructions: task.instructions,
       status: task.status,
       assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+      batchNumber: user.totalCompletedTasks ? Math.floor(user.totalCompletedTasks / BATCH_SIZE) + 1 : 1,
     });
   }
-
+  
   await batch.commit();
-
+  
   await firestore.collection("Users").doc(data.uid).update({
     hasTasks: true,
   });
-
+  
+  ws.send(JSON.stringify({
+    type: "taskResponse",
+    status: "Success",
+    tasks: assignedTasks.map(t => ({ taskId: t.taskId, type: t.type })),
+    message: `${tasksToAssign.length} tasks assigned. Complete them to unlock the next batch!`,
+  }));
+  
   break;
-case "startTask":
+  case "startTask":
   if (!data.userId || !data.taskId) break;
 
   const duration = 900; // seconds
@@ -600,6 +648,7 @@ case "startTask":
   if (data.taskType == "Content Review") {
     const key = `${data.uid}_${data.taskId}`;
     let timer;
+    let payOut=0;
 
     try {
       if (activeTaskTimers.has(key)) {
@@ -652,28 +701,33 @@ case "startTask":
   const currentPoints = userSnap.data().accountPoints || 0;
 
   let pointsEarned = 0;
+ if (aiScore >= 80) {
+  const payPercent = aiScore / 100;
+  const fullPay = parseInt(taskSnap.data().pay, 10) || 0;
+   payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
+  
+  rewarded = true;
+  status = "Completed";
 
-  if (aiScore >= 80) {
-    cash = parseInt(taskSnap.data().pay, 10) || 0;
-    rewarded = true;
-    status = "Completed";
+  // 🎯 POINTS LOGIC
+  pointsEarned = Math.floor(aiScore / 10); // e.g. 85 → 8 points
 
-    // 🎯 POINTS LOGIC
-    pointsEarned = Math.floor(aiScore / 10); // e.g. 85 → 8 points
+  tx.update(taskRef, {
+    aiScore,
+    reviewedAt: Date.now(),
+    status,
+    rewarded: true,
+    pointsEarned,
+    fullPay,        // Store original amount
+    payOut,         // Store what they actually got
+    payPercent,     // Store percentage
+  });
 
-    tx.update(taskRef, {
-      aiScore,
-      reviewedAt: Date.now(),
-      status,
-      rewarded: true,
-      pointsEarned, // optional but useful
-    });
-
-    tx.update(userRef, {
-      accountBalance: currentBalance + cash,
-      accountPoints: currentPoints + pointsEarned, // 🔥 THIS IS NEW
-    });
-  } else {
+  tx.update(userRef, {
+    accountBalance: currentBalance + payOut,  // ✅ Add payOut, not fullPay!
+    accountPoints: currentPoints + pointsEarned,
+  });
+}else {
     tx.update(taskRef, {
       aiScore,
       reviewedAt: Date.now(),
@@ -683,25 +737,29 @@ case "startTask":
   }
 });
 
-      if (timer?.sockets?.size) {
-        timer.sockets.forEach((s) => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(
-              JSON.stringify({
-                type: "taskComplete",
-                taskId: data.taskId,
-                aiScore,
-                payOut: cash,
-                rewarded,
-                status,
-                completeMethod: "Instant",
-              }),
-            );
-          }
-        });
-      }
 
-      activeTaskTimers.delete(key);
+  const cooldownInfo = await checkAndSetCooldown(data.uid);
+
+    if (timer?.sockets?.size) {
+      timer.sockets.forEach((s) => {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(
+            JSON.stringify({
+              type: "taskComplete",
+              taskId: data.taskId,
+              aiScore,
+              payOut,  // ✅ USE payOut (not cash)
+              rewarded,
+              status,
+              completeMethod: "Instant",
+              cooldown: cooldownInfo, // ✅ SEND cooldown info
+            }),
+          );
+        }
+      });
+    }
+
+    activeTaskTimers.delete(key);
     } catch (error) {
       console.error("Error processing task:", error.message);
 
@@ -724,6 +782,7 @@ case "startTask":
   if (data.taskType === "Content Translation") {
     const key = `${data.uid}_${data.taskId}`;
     let timer;
+    let payOut = 0;
 
     try {
 
@@ -748,21 +807,16 @@ case "startTask":
   return;
        }
 
+
       if (activeTaskTimers.has(key)) {
         timer = activeTaskTimers.get(key);
         clearInterval(timer.intervalId);
       }
-
-
-
       const reference = data.textotranslate ;
       const userText = data.translatedText;
       if (!reference || !userText) throw new Error("Invalid input");
    
 let aiScore = await weRTest(reference, userText, modelInstance);
-
-console.log("Score:", aiScore);
-
       const userRef = firestore.collection("Users").doc(data.uid);
       const taskRef = userRef
         .collection("assignedTasks")
@@ -786,27 +840,32 @@ console.log("Score:", aiScore);
 
   let pointsEarned = 0;
 
-  if (aiScore >= 75) {
-    cash = parseInt(taskSnap.data().pay, 10) || 0;
-    rewarded = true;
-    status = "Completed";
+ if (aiScore >= 75) {
+  const payPercent = aiScore / 100;
+  const fullPay = parseInt(taskSnap.data().pay, 10) || 0;
+   payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
+  rewarded = true;
+  status = "Completed";
 
-    // 🎯 POINTS LOGIC
-    pointsEarned = Math.floor(aiScore / 10);
+  // 🎯 POINTS LOGIC
+  pointsEarned = Math.floor(aiScore / 10);
 
-    tx.update(taskRef, {
-      aiScore,
-      reviewedAt: Date.now(),
-      status,
-      rewarded: true,
-      pointsEarned, // optional but useful
-    });
+  tx.update(taskRef, {
+    aiScore,
+    reviewedAt: Date.now(),
+    status,
+    rewarded: true,
+    pointsEarned,
+    fullPay,
+    payOut,
+    payPercent,
+  });
 
-    tx.update(userRef, {
-      accountBalance: currentBalance + cash,
-      accountPoints: currentPoints + pointsEarned, // 🔥 NEW
-    });
-  } else {
+  tx.update(userRef, {
+    accountBalance: currentBalance + payOut,  // ✅ Use payOut, not cash
+    accountPoints: currentPoints + pointsEarned,
+  });
+} else {
     tx.update(taskRef, {
       aiScore,
       reviewedAt: Date.now(),
@@ -816,24 +875,22 @@ console.log("Score:", aiScore);
   }
 });
 
-      if (timer?.sockets?.size) {
-        timer.sockets.forEach((s) => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(
-              JSON.stringify({
-                type: "taskComplete",
-                taskId: data.taskId,
-                aiScore,
-                payOut: cash,
-                rewarded,
-                status,
-                completeMethod: "Instant",
-              }),
-            );
-          }
-        });
-      }
+  const cooldownInfo = await checkAndSetCooldown(data.uid);
 
+    if (timer?.sockets?.size) {
+      timer.sockets.forEach((s) => {
+        s.send(JSON.stringify({
+          type: "taskComplete",
+          taskId: data.taskId,
+          aiScore,
+          payOut,  // ✅ USE payOut
+          rewarded,
+          status,
+          completeMethod: "Instant",
+          cooldown: cooldownInfo,
+        }));
+      });
+    }
       activeTaskTimers.delete(key);
     } catch (error) {
       console.error("Error processing translation task:", error.message);
@@ -857,6 +914,8 @@ console.log("Score:", aiScore);
   if (data.taskType === "Fact Check") {
     const key = `${data.uid}_${data.taskId}`;
     let timer;
+        let payOut = 0;
+
 
     try {
       if (activeTaskTimers.has(key)) {
@@ -919,26 +978,31 @@ console.log("Score:", aiScore);
   let pointsEarned = 0;
 
   if (aiScore >= 90) {
-    cash = parseInt(taskSnap.data().pay, 10) || 0;
-    rewarded = true;
-    status = "Completed";
+  const payPercent = aiScore / 100;
+  const fullPay = parseInt(taskSnap.data().pay, 10) || 0;
+   payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
+  rewarded = true;
+  status = "Completed";
 
-    // 🎯 POINTS LOGIC
-    pointsEarned = Math.floor(aiScore / 10);
+  // 🎯 POINTS LOGIC
+  pointsEarned = Math.floor(aiScore / 10);
 
-    tx.update(taskRef, {
-      aiScore,
-      reviewedAt: Date.now(),
-      status,
-      rewarded: true,
-      pointsEarned, // optional
-    });
+  tx.update(taskRef, {
+    aiScore,
+    reviewedAt: Date.now(),
+    status,
+    rewarded: true,
+    pointsEarned,
+    fullPay,
+    payOut,
+    payPercent,
+  });
 
-    tx.update(userRef, {
-      accountBalance: currentBalance + cash,
-      accountPoints: currentPoints + pointsEarned, // 🔥 NEW
-    });
-  } else {
+  tx.update(userRef, {
+    accountBalance: currentBalance + payOut,  // ✅ Use payOut, not cash
+    accountPoints: currentPoints + pointsEarned,
+  });
+}else {
     tx.update(taskRef, {
       aiScore,
       reviewedAt: Date.now(),
@@ -947,24 +1011,22 @@ console.log("Score:", aiScore);
     });
   }
 });
+ const cooldownInfo = await checkAndSetCooldown(data.uid);
 
-      if (timer?.sockets?.size) {
-        timer.sockets.forEach((s) => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(
-              JSON.stringify({
-                type: "taskComplete",
-                taskId: data.taskId,
-                aiScore,
-                payOut: cash,
-                rewarded,
-                status,
-                completeMethod: "Instant",
-              }),
-            );
-          }
-        });
-      }
+    if (timer?.sockets?.size) {
+      timer.sockets.forEach((s) => {
+        s.send(JSON.stringify({
+          type: "taskComplete",
+          taskId: data.taskId,
+          aiScore,
+          payOut,  // ✅ USE payOut
+          rewarded,
+          status,
+          completeMethod: "Instant",
+          cooldown: cooldownInfo,
+        }));
+      });
+    }
 
       activeTaskTimers.delete(key);
     } catch (error) {
@@ -1407,10 +1469,10 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
       });
     }
 
-    if (withdrawAmount < 30) {
+    if (withdrawAmount < 50) {
       return res.status(400).json({
         status: 400,
-        msg: "Minimum withdrawal is $30",
+        msg: "Minimum withdrawal is $50",
       });
     }
 
@@ -1511,3 +1573,4 @@ await transactionRef.set({
     });
   }
 });
+
