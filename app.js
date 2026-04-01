@@ -429,7 +429,7 @@ wss.on("connection", (ws) => {
     break;
 case "requestTask":
   if (!data.uid) return;
-
+  
   const userRef = firestore.collection("Users").doc(data.uid);
   const userSnap = await userRef.get();
 
@@ -455,7 +455,7 @@ case "requestTask":
     break;
   }
 
-  // ✅ NEW: Check if user is in cooldown
+  // ✅ Check if user is in cooldown
   if (user.taskCooldownUntil && user.taskCooldownUntil.toMillis() > now) {
     const remainingMinutes = Math.ceil((user.taskCooldownUntil.toMillis() - now) / 60000);
     const remainingHours = Math.floor(remainingMinutes / 60);
@@ -498,40 +498,42 @@ case "requestTask":
     break;
   }
 
-// ✅ USER IS ELIGIBLE → FETCH TASKS
-const taskQuery = await firestore
-  .collection("Ai-tasks")
-  .where("status", "==", "active")
-  .get();
+  // ✅ USER IS ELIGIBLE → FETCH TASKS
+  const taskQuery = await firestore
+    .collection("Ai-tasks")
+    .where("status", "==", "active")
+    .get();
 
-if (taskQuery.empty) {
-  ws.send(JSON.stringify({
-    type: "taskResponse",
-    status: "No Tasks Available",
-    reason: "Sorry, we have no tasks at the moment. Try again later.",
+  if (taskQuery.empty) {
+    ws.send(JSON.stringify({
+      type: "taskResponse",
+      status: "No Tasks Available",
+      reason: "Sorry, we have no tasks at the moment. Try again later.",
+    }));
+    break;
+  }
+
+  // Convert to array and shuffle
+  const availableTasks = taskQuery.docs.map((doc) => ({
+    taskId: doc.id,
+    ...doc.data(),
   }));
-  break;
-}
 
-// Convert to array and shuffle
-const availableTasks = taskQuery.docs.map((doc) => ({
-  taskId: doc.id,
-  ...doc.data(),
-}));
+  // Fisher-Yates shuffle for randomness
+  for (let i = availableTasks.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [availableTasks[i], availableTasks[j]] = [availableTasks[j], availableTasks[i]];
+  }
 
-// Fisher-Yates shuffle for randomness
-for (let i = availableTasks.length - 1; i > 0; i--) {
-  const j = Math.floor(Math.random() * (i + 1));
-  [availableTasks[i], availableTasks[j]] = [availableTasks[j], availableTasks[i]];
-}
-
-const BATCH_SIZE = 10;
-const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
+  const BATCH_SIZE = 10;
+  const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
+  
+  // ✅ DECLARE HERE (outside transaction)
+  let assignedTasks = [];
 
   await admin.firestore().runTransaction(async (tx) => {
     tx.update(userRef, {
       dailyTaskTaken: admin.firestore.FieldValue.increment(tasksToAssign.length),
-      // ✅ Set cooldown for after tasks are completed (will be updated when tasks finish)
     });
 
     for (const task of tasksToAssign) {
@@ -587,7 +589,6 @@ const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
   }));
   
   break;
-  
   case "startTask":
   if (!data.userId || !data.taskId) break;
 
