@@ -498,16 +498,13 @@ case "requestTask":
     break;
   }
 
-  // ✅ USER IS ELIGIBLE → FETCH TASKS
-const tasksSnapshot = await firestore
+// ✅ USER IS ELIGIBLE → FETCH TASKS
+const taskQuery = await firestore
   .collection("Ai-tasks")
   .where("status", "==", "active")
-  .count()
   .get();
 
-const totalTasks = tasksSnapshot.data().count;
-
-if (totalTasks === 0) {
+if (taskQuery.empty) {
   ws.send(JSON.stringify({
     type: "taskResponse",
     status: "No Tasks Available",
@@ -516,25 +513,19 @@ if (totalTasks === 0) {
   break;
 }
 
-// Generate random start point
-const BATCH_SIZE = 10;
-const randomStart = Math.floor(Math.random() * Math.max(1, totalTasks - BATCH_SIZE));
-
-// Get tasks with random offset
-const taskQuery = await firestore
-  .collection("Ai-tasks")
-  .where("status", "==", "active")
-  .orderBy("assignCount") // Need to order by something for offset to work
-  .limit(BATCH_SIZE)
-  .offset(randomStart)
-  .get();
-
-let assignedTasks = [];
+// Convert to array and shuffle
 const availableTasks = taskQuery.docs.map((doc) => ({
   taskId: doc.id,
   ...doc.data(),
 }));
 
+// Fisher-Yates shuffle for randomness
+for (let i = availableTasks.length - 1; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  [availableTasks[i], availableTasks[j]] = [availableTasks[j], availableTasks[i]];
+}
+
+const BATCH_SIZE = 10;
 const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
 
   await admin.firestore().runTransaction(async (tx) => {
