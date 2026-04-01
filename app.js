@@ -499,29 +499,43 @@ case "requestTask":
   }
 
   // ✅ USER IS ELIGIBLE → FETCH TASKS
-  const taskQuery = await firestore
-    .collection("Ai-tasks")
-    .where("status", "==", "active")
-    .limit(10)
-    .get();
+const tasksSnapshot = await firestore
+  .collection("Ai-tasks")
+  .where("status", "==", "active")
+  .count()
+  .get();
 
-  if (taskQuery.empty) {
-    ws.send(JSON.stringify({
-      type: "taskResponse",
-      status: "No Tasks Available",
-      reason: "Sorry, we have no tasks at the moment. Try again later.",
-    }));
-    break;
-  }
+const totalTasks = tasksSnapshot.data().count;
 
-  let assignedTasks = [];
-  const availableTasks = taskQuery.docs.map((doc) => ({
-    taskId: doc.id,
-    ...doc.data(),
+if (totalTasks === 0) {
+  ws.send(JSON.stringify({
+    type: "taskResponse",
+    status: "No Tasks Available",
+    reason: "Sorry, we have no tasks at the moment. Try again later.",
   }));
+  break;
+}
 
-  const BATCH_SIZE = 5; // ✅ 5 tasks per batch
-  const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
+// Generate random start point
+const BATCH_SIZE = 10;
+const randomStart = Math.floor(Math.random() * Math.max(1, totalTasks - BATCH_SIZE));
+
+// Get tasks with random offset
+const taskQuery = await firestore
+  .collection("Ai-tasks")
+  .where("status", "==", "active")
+  .orderBy("assignCount") // Need to order by something for offset to work
+  .limit(BATCH_SIZE)
+  .offset(randomStart)
+  .get();
+
+let assignedTasks = [];
+const availableTasks = taskQuery.docs.map((doc) => ({
+  taskId: doc.id,
+  ...doc.data(),
+}));
+
+const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
 
   await admin.firestore().runTransaction(async (tx) => {
     tx.update(userRef, {
@@ -582,6 +596,7 @@ case "requestTask":
   }));
   
   break;
+  
   case "startTask":
   if (!data.userId || !data.taskId) break;
 
