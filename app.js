@@ -6,6 +6,7 @@ const path = require("path");
 const port = 3322;
 const app = express();
 const admin = require("firebase-admin");
+const https = require("https")
 const deepl = require("deepl-node");
 
 const {
@@ -1590,3 +1591,275 @@ await transactionRef.set({
   }
 });
 
+
+
+// buy tokens - Add upload.none() middleware
+app.post('/payNow', upload.none(), async (req, res) => {
+  const { uid, payEmail, name, amount } = req.body;
+
+  // ✅ Validate required fields
+  if (!uid || !payEmail || !name || !amount) {
+    return res.status(400).json({ 
+      error: 'Missing required fields: uid, payEmail, name, amount' 
+    });
+  }
+
+  // ✅ Validate amount
+  const numAmount = parseFloat(amount);
+  if (isNaN(numAmount) || numAmount < 5 || numAmount > 500) {
+    return res.status(400).json({ 
+      error: 'Amount must be between $5 and $500 USD' 
+    });
+  }
+
+  // ✅ Calculate tokens (6 tokens per $1)
+  const TOKEN_RATE = 6;
+  const tokensToAdd = Math.round(numAmount * TOKEN_RATE);
+
+  // ✅ Store purchase info in Firestore
+  const purchaseRef = firestore.collection("TokenPurchases").doc();
+  await purchaseRef.set({
+    uid,
+    email: payEmail,
+    name,
+    amount: numAmount,
+    tokens: tokensToAdd,
+    status: "pending",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  const params = JSON.stringify({
+    email: payEmail,
+    amount: numAmount * 100,
+    currency: "USD",
+    channels: ["card"],
+    callback_url: `${process.env.FRONTEND_URL}/confirmpayment`,
+    metadata: {
+      uid: uid,
+      purchaseId: purchaseRef.id,
+      tokens: tokensToAdd,
+      amount: numAmount,
+    }
+  });
+
+  const options = {
+    hostname: 'api.paystack.co',
+    port: 443,
+    path: '/transaction/initialize',
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+      'Content-Type': 'application/json'
+    }
+  };
+
+  const payStackreq = https.request(options, (payStackres) => {
+    let data = '';
+
+    payStackres.on('data', (chunk) => {
+      data += chunk;
+    });
+
+    payStackres.on('end', () => {
+      try {
+        const payStackRespData = JSON.parse(data);
+        console.log(payStackRespData);
+        
+        if (payStackRespData.status && payStackRespData.data?.reference) {
+          purchaseRef.update({
+            reference: payStackRespData.data.reference,
+            paystackData: payStackRespData.data
+          });
+        }
+        
+        res.json(payStackRespData);
+      } catch (error) {
+        console.error("Parse error:", error);
+        res.status(500).json({ error: 'Invalid response from payment provider' });
+      }
+    });
+  }).on('error', (error) => {
+    console.error("Request error:", error);
+    res.status(500).json({ error: 'Payment initialization failed' });
+  });
+
+  payStackreq.write(params);
+  payStackreq.end();
+});
+
+
+
+// Verify webhook signature
+const verifyPaystackSignature = (req) => {
+  const secret = process.env.PAYSTACK_SECRET_KEY;
+  const signature = req.headers['x-paystack-signature'];
+  
+  if (!signature) return false;
+  
+  const hash = crypto
+    .createHmac('sha512', secret)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+  
+  return hash === signature;
+};
+
+
+// Webhook endpoint for Paystack payment verification
+app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  // Verify signature
+  if (!verifyPaystackSignature(req)) {
+    console.log('Invalid webhook signature');
+    return res.status(401).send('Unauthorized');
+  }
+  
+  const event = req.body;
+  console.log('Webhook received:', event.event);
+  
+  // Handle successful payment
+  if (event.event === 'charge.success') {
+    const { reference, metadata } = event.data;
+    
+    try {
+      // Find pending purchase by reference
+      const purchaseQuery = await firestore
+        .collection("TokenPurchases")
+        .where("reference", "==", reference)
+        .limit(1)
+        .get();
+      
+      if (purchaseQuery.empty) {
+        console.log('Purchase not found for reference:', reference);
+        return res.sendStatus(200);
+      }
+      
+      const purchaseDoc = purchaseQuery.docs[0];
+      const purchase = purchaseDoc.data();
+      
+      // Check if already processed
+      if (purchase.status === 'completed') {
+        console.log('Purchase already processed:', reference);
+        return res.sendStatus(200);
+      }
+      
+      // Update purchase status
+      await purchaseDoc.ref.update({
+        status: 'completed',
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+        paystackData: event.data
+      });
+      
+      // ✅ Add tokens to user's account (using solaraTokens field)
+      const userRef = firestore.collection("Users").doc(purchase.uid);
+      await userRef.update({
+        solaraTokens: admin.firestore.FieldValue.increment(purchase.tokens)
+        // Removed duplicate tokenBalance since your document uses solaraTokens
+      });
+      
+      console.log(`✅ Added ${purchase.tokens} Solara Tokens to user ${purchase.uid}`);
+      console.log(`User ${purchase.uid} now has updated token balance`);
+      
+    } catch (error) {
+      console.error('Webhook processing error:', error);
+    }
+  }
+  
+  // Always return 200 to acknowledge receipt
+  res.sendStatus(200);
+});
+
+// Verify payment manually
+app.post('/verify-payment', async (req, res) => {
+  const { reference } = req.body;
+  
+  if (!reference) {
+    return res.status(400).json({ error: 'Reference is required' });
+  }
+  
+  try {
+    // Check if already processed
+    const purchaseQuery = await firestore
+      .collection("TokenPurchases")
+      .where("reference", "==", reference)
+      .limit(1)
+      .get();
+    
+    if (!purchaseQuery.empty) {
+      const purchase = purchaseQuery.docs[0].data();
+      
+      if (purchase.status === 'completed') {
+        return res.json({ 
+          status: 'success', 
+          message: 'Payment already verified',
+          tokens: purchase.tokens
+        });
+      }
+    }
+    
+    // Verify with Paystack API
+    const options = {
+      hostname: 'api.paystack.co',
+      port: 443,
+      path: `/transaction/verify/${reference}`,
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+      }
+    };
+    
+    const paystackRes = await new Promise((resolve, reject) => {
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+    
+    if (paystackRes.status && paystackRes.data.status === 'success') {
+      const { metadata, amount } = paystackRes.data;
+      const tokensToAdd = metadata?.tokens || Math.round((amount / 100) * 6);
+      
+      if (purchaseQuery.empty) {
+        // Create purchase record
+        await firestore.collection("TokenPurchases").doc().set({
+          uid: metadata?.uid,
+          reference: reference,
+          amount: amount / 100,
+          tokens: tokensToAdd,
+          status: 'completed',
+          paidAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      } else {
+        await purchaseQuery.docs[0].ref.update({
+          status: 'completed',
+          paidAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      
+      // ✅ Update solaraTokens field
+      const userRef = firestore.collection("Users").doc(metadata?.uid);
+      await userRef.update({
+        solaraTokens: admin.firestore.FieldValue.increment(tokensToAdd)
+      });
+      
+      return res.json({ 
+        status: 'success', 
+        tokens: tokensToAdd
+      });
+    }
+    
+    res.json({ status: 'pending', message: 'Payment not yet verified' });
+    
+  } catch (error) {
+    console.error('Verification error:', error);
+    res.status(500).json({ error: 'Verification failed' });
+  }
+});

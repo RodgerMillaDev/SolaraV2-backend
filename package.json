@@ -23,6 +23,7 @@
     "firebase-admin": "^13.6.0",
     "google-auth-library": "^10.6.1",
     "http": "^0.0.1-security",
+    "https": "^1.0.0",
     "install": "^0.13.0",
     "languagetool-api": "^1.1.2",
     "multer": "^2.0.2",
