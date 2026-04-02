@@ -1689,25 +1689,34 @@ app.post('/payNow', upload.none(), async (req, res) => {
 
 
 
-// Verify webhook signature
+// Verify webhook signature (function definition only - NO CALL)
 const verifyPaystackSignature = (req) => {
   const secret = process.env.PAYSTACK_SECRET_KEY;
   const signature = req.headers['x-paystack-signature'];
   
-  if (!signature) return false;
+  console.log('Signature received:', signature);
+  console.log('Secret key (first 10 chars):', secret?.substring(0, 10));
   
+  if (!signature) {
+    console.log('❌ No signature header');
+    return false;
+  }
+  
+  const rawBody = req.body.toString();
   const hash = crypto
     .createHmac('sha512', secret)
-    .update(JSON.stringify(req.body))
+    .update(rawBody)
     .digest('hex');
+  
+  console.log('Calculated hash:', hash);
+  console.log('Signature matches:', hash === signature);
   
   return hash === signature;
 };
 
-
-// Webhook endpoint for Paystack payment verification
+// ✅ Webhook route - THIS is where the function should be called
 app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  // Verify signature
+  // Verify signature - passing req object here
   if (!verifyPaystackSignature(req)) {
     console.log('Invalid webhook signature');
     return res.status(401).send('Unauthorized');
@@ -1721,7 +1730,6 @@ app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (
     const { reference, metadata } = event.data;
     
     try {
-      // Find pending purchase by reference
       const purchaseQuery = await firestore
         .collection("TokenPurchases")
         .where("reference", "==", reference)
@@ -1736,35 +1744,29 @@ app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (
       const purchaseDoc = purchaseQuery.docs[0];
       const purchase = purchaseDoc.data();
       
-      // Check if already processed
       if (purchase.status === 'completed') {
         console.log('Purchase already processed:', reference);
         return res.sendStatus(200);
       }
       
-      // Update purchase status
       await purchaseDoc.ref.update({
         status: 'completed',
         paidAt: admin.firestore.FieldValue.serverTimestamp(),
         paystackData: event.data
       });
       
-      // ✅ Add tokens to user's account (using solaraTokens field)
       const userRef = firestore.collection("Users").doc(purchase.uid);
       await userRef.update({
         solaraTokens: admin.firestore.FieldValue.increment(purchase.tokens)
-        // Removed duplicate tokenBalance since your document uses solaraTokens
       });
       
       console.log(`✅ Added ${purchase.tokens} Solara Tokens to user ${purchase.uid}`);
-      console.log(`User ${purchase.uid} now has updated token balance`);
       
     } catch (error) {
       console.error('Webhook processing error:', error);
     }
   }
   
-  // Always return 200 to acknowledge receipt
   res.sendStatus(200);
 });
 
