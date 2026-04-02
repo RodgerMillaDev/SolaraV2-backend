@@ -487,7 +487,7 @@ case "requestTask":
   }
 
   // ❌ Daily limit reached
-  if (user.dailyTaskTaken >= 100) {
+  if (user.dailyTaskTaken >= 30) {
     ws.send(JSON.stringify({
       type: "taskResponse",
       status: "Limit Reached",
