@@ -35,6 +35,15 @@ const checkAndSetCooldown = async (userId) => {
     const cooldownHours = 2;
     const cooldownUntil = new Date(Date.now() + cooldownHours * 60 * 60 * 1000);
     
+    // ✅ Delete ALL tasks in assignedTasks collection
+    const allTasks = await tasksRef.get();
+    const batch = firestore.batch();
+    allTasks.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+    await batch.commit();
+    
+    // ✅ Update user document with cooldown
     await userRef.update({
       taskCooldownUntil: admin.firestore.Timestamp.fromDate(cooldownUntil),
       lastTaskBatchCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -45,7 +54,6 @@ const checkAndSetCooldown = async (userId) => {
   }
   return null;
 };
-
 const authKey = process.env.TRANSLATE_AUTHKEY; // replace with your key
 const translator = new deepl.Translator(authKey);
 async function translateTxt(content, trnsLang) {
@@ -848,7 +856,7 @@ let aiScore = await weRTest(reference, userText, modelInstance);
 
   let pointsEarned = 0;
 
- if (aiScore >= 75) {
+ if (aiScore >= 70) {
   const payPercent = aiScore / 100;
   const fullPay = parseInt(taskSnap.data().pay, 10) || 0;
    payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
@@ -985,7 +993,7 @@ let aiScore = await weRTest(reference, userText, modelInstance);
 
   let pointsEarned = 0;
 
-  if (aiScore >= 90) {
+  if (aiScore >= 70) {
   const payPercent = aiScore / 100;
   const fullPay = parseInt(taskSnap.data().pay, 10) || 0;
    payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
