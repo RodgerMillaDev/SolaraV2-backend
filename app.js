@@ -528,7 +528,7 @@ case "requestTask":
   const BATCH_SIZE = 10;
   const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
   
-  // ✅ DECLARE HERE (outside transaction)
+  // ✅ DECLARE assignedTasks HERE (outside transaction)
   let assignedTasks = [];
 
   await admin.firestore().runTransaction(async (tx) => {
@@ -589,6 +589,7 @@ case "requestTask":
   }));
   
   break;
+ 
   case "startTask":
   if (!data.userId || !data.taskId) break;
 
