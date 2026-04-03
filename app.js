@@ -1771,7 +1771,7 @@ app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (
 });
 
 // Verify payment manually
-app.post('/verify-payment', async (req, res) => {
+app.post('/verify-payment', upload.none(), async (req, res) => {
   const { reference } = req.body;
   
   if (!reference) {
