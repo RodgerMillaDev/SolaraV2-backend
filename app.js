@@ -1686,9 +1686,6 @@ app.post('/payNow', upload.none(), async (req, res) => {
   payStackreq.write(params);
   payStackreq.end();
 });
-
-
-
 // Verify webhook signature (function definition only - NO CALL)
 const verifyPaystackSignature = (req) => {
   const secret = process.env.PAYSTACK_SECRET_KEY;
@@ -1770,13 +1767,15 @@ app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (
   res.sendStatus(200);
 });
 
-// ✅ VERIFY PAYMENT - Accept JSON (no multer needed)
-app.post('/verify-payment', async (req, res) => {
+// ✅ VERIFY PAYMENT - Accept FormData (with multer)
+app.post('/verify-payment', upload.none(), async (req, res) => {
   const { reference } = req.body;
   
-  console.log('Verifying payment for reference:', reference);
+  console.log("🔍 Verification request received");
+  console.log("Reference:", reference);
   
   if (!reference) {
+    console.log("❌ No reference provided");
     return res.status(400).json({ error: 'Reference is required' });
   }
   
@@ -1792,6 +1791,7 @@ app.post('/verify-payment', async (req, res) => {
       const purchase = purchaseQuery.docs[0].data();
       
       if (purchase.status === 'completed') {
+        console.log("✅ Payment already verified:", reference);
         return res.json({ 
           status: 'success', 
           message: 'Payment already verified',
@@ -1827,11 +1827,25 @@ app.post('/verify-payment', async (req, res) => {
       req.end();
     });
     
-    console.log('Paystack response:', paystackRes);
+    console.log('Paystack response status:', paystackRes.status);
     
     if (paystackRes.status && paystackRes.data.status === 'success') {
       const { metadata, amount } = paystackRes.data;
-      const tokensToAdd = metadata?.tokens || Math.round((amount / 100) * 6);
+      
+      // ✅ FIX: Ensure tokensToAdd is a valid number
+      let tokensToAdd = metadata?.tokens || Math.round((amount / 100) * 6);
+      
+      // Validate tokensToAdd
+      if (isNaN(tokensToAdd) || tokensToAdd === undefined || tokensToAdd === null) {
+        console.error("Invalid tokensToAdd:", tokensToAdd);
+        tokensToAdd = 0;
+      }
+      
+      // Ensure it's a number and round it
+      tokensToAdd = Number(tokensToAdd);
+      tokensToAdd = Math.round(tokensToAdd);
+      
+      console.log(`💰 Adding ${tokensToAdd} tokens to user`);
       
       if (purchaseQuery.empty) {
         // Create purchase record
@@ -1850,11 +1864,16 @@ app.post('/verify-payment', async (req, res) => {
         });
       }
       
-      // ✅ Update solaraTokens field
-      const userRef = firestore.collection("Users").doc(metadata?.uid);
-      await userRef.update({
-        solaraTokens: admin.firestore.FieldValue.increment(tokensToAdd)
-      });
+      // ✅ FIX: Only increment if tokensToAdd > 0
+      if (tokensToAdd > 0 && metadata?.uid) {
+        const userRef = firestore.collection("Users").doc(metadata?.uid);
+        await userRef.update({
+          solaraTokens: admin.firestore.FieldValue.increment(tokensToAdd)
+        });
+        console.log(`✅ Added ${tokensToAdd} tokens to user ${metadata?.uid}`);
+      } else {
+        console.log("⚠️ No tokens to add or missing UID");
+      }
       
       return res.json({ 
         status: 'success', 
@@ -1866,6 +1885,6 @@ app.post('/verify-payment', async (req, res) => {
     
   } catch (error) {
     console.error('Verification error:', error);
-    res.status(500).json({ error: 'Verification failed' });
+    res.status(500).json({ error: 'Verification failed: ' + error.message });
   }
 });
