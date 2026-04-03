@@ -1770,9 +1770,11 @@ app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (
   res.sendStatus(200);
 });
 
-// Verify payment manually
-app.post('/verify-payment', upload.none(), async (req, res) => {
+// ✅ VERIFY PAYMENT - Accept JSON (no multer needed)
+app.post('/verify-payment', async (req, res) => {
   const { reference } = req.body;
+  
+  console.log('Verifying payment for reference:', reference);
   
   if (!reference) {
     return res.status(400).json({ error: 'Reference is required' });
@@ -1824,6 +1826,8 @@ app.post('/verify-payment', upload.none(), async (req, res) => {
       req.on('error', reject);
       req.end();
     });
+    
+    console.log('Paystack response:', paystackRes);
     
     if (paystackRes.status && paystackRes.data.status === 'success') {
       const { metadata, amount } = paystackRes.data;
