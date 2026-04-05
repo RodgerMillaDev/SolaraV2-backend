@@ -537,7 +537,6 @@ case "requestTask":
   const BATCH_SIZE = 10;
   const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
   
-  // ✅ DECLARE assignedTasks HERE (outside transaction)
   let assignedTasks = [];
 
   await admin.firestore().runTransaction(async (tx) => {
@@ -590,6 +589,36 @@ case "requestTask":
     hasTasks: true,
   });
   
+  // ✅ UPDATE STATISTICS - tasksRequested
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const currentMonth = monthNames[new Date().getMonth()];
+  const currentYear = new Date().getFullYear();
+  const statsRef = firestore
+    .collection("Users")
+    .doc(data.uid)
+    .collection("taskStats")
+    .doc(`${currentYear}_${currentMonth}`);
+  
+  await firestore.runTransaction(async (tx) => {
+    const statsSnap = await tx.get(statsRef);
+    
+    if (statsSnap.exists) {
+      tx.update(statsRef, {
+        tasksRequested: admin.firestore.FieldValue.increment(tasksToAssign.length),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } else {
+      tx.set(statsRef, {
+        month: currentMonth,
+        year: currentYear,
+        tasksRequested: tasksToAssign.length,
+        tasksCompleted: 0,
+        totalEarnings: 0,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  });
+  
   ws.send(JSON.stringify({
     type: "taskResponse",
     status: "Success",
@@ -598,7 +627,6 @@ case "requestTask":
   }));
   
   break;
- 
   case "startTask":
   if (!data.userId || !data.taskId) break;
 
@@ -741,7 +769,7 @@ case "requestTask":
   });
 
   tx.update(userRef, {
-    accountBalance: currentBalance + payOut,  // ✅ Add payOut, not fullPay!
+  accountBalance: Math.round((currentBalance + payOut) * 100) / 100,
     accountPoints: currentPoints + pointsEarned,
   });
 }else {
@@ -753,6 +781,38 @@ case "requestTask":
     });
   }
 });
+
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const currentMonth = monthNames[new Date().getMonth()];
+const currentYear = new Date().getFullYear();
+const statsRef = firestore
+  .collection("Users")
+  .doc(data.uid)
+  .collection("taskStats")
+  .doc(`${currentYear}_${currentMonth}`);
+
+await firestore.runTransaction(async (tx) => {
+  const statsSnap = await tx.get(statsRef);
+  
+  if (statsSnap.exists) {
+    tx.update(statsRef, {
+      tasksCompleted: admin.firestore.FieldValue.increment(1),
+      totalEarnings: admin.firestore.FieldValue.increment(payOut),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } else {
+    tx.set(statsRef, {
+      month: currentMonth,
+      year: currentYear,
+      tasksRequested: 0,
+      tasksCompleted: 1,
+      totalEarnings: payOut,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+});
+
+
 
 
   const cooldownInfo = await checkAndSetCooldown(data.uid);
@@ -879,7 +939,7 @@ let aiScore = await weRTest(reference, userText, modelInstance);
   });
 
   tx.update(userRef, {
-    accountBalance: currentBalance + payOut,  // ✅ Use payOut, not cash
+  accountBalance: Math.round((currentBalance + payOut) * 100) / 100,
     accountPoints: currentPoints + pointsEarned,
   });
 } else {
@@ -891,6 +951,37 @@ let aiScore = await weRTest(reference, userText, modelInstance);
     });
   }
 });
+
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const currentMonth = monthNames[new Date().getMonth()];
+const currentYear = new Date().getFullYear();
+const statsRef = firestore
+  .collection("Users")
+  .doc(data.uid)
+  .collection("taskStats")
+  .doc(`${currentYear}_${currentMonth}`);
+
+await firestore.runTransaction(async (tx) => {
+  const statsSnap = await tx.get(statsRef);
+  
+  if (statsSnap.exists) {
+    tx.update(statsRef, {
+      tasksCompleted: admin.firestore.FieldValue.increment(1),
+      totalEarnings: admin.firestore.FieldValue.increment(payOut),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } else {
+    tx.set(statsRef, {
+      month: currentMonth,
+      year: currentYear,
+      tasksRequested: 0,
+      tasksCompleted: 1,
+      totalEarnings: payOut,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+});
+
 
   const cooldownInfo = await checkAndSetCooldown(data.uid);
 
@@ -1016,7 +1107,7 @@ let aiScore = await weRTest(reference, userText, modelInstance);
   });
 
   tx.update(userRef, {
-    accountBalance: currentBalance + payOut,  // ✅ Use payOut, not cash
+    accountBalance: Math.round((currentBalance + payOut) * 100) / 100,
     accountPoints: currentPoints + pointsEarned,
   });
 }else {
@@ -1028,6 +1119,37 @@ let aiScore = await weRTest(reference, userText, modelInstance);
     });
   }
 });
+
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const currentMonth = monthNames[new Date().getMonth()];
+const currentYear = new Date().getFullYear();
+const statsRef = firestore
+  .collection("Users")
+  .doc(data.uid)
+  .collection("taskStats")
+  .doc(`${currentYear}_${currentMonth}`);
+
+await firestore.runTransaction(async (tx) => {
+  const statsSnap = await tx.get(statsRef);
+  
+  if (statsSnap.exists) {
+    tx.update(statsRef, {
+      tasksCompleted: admin.firestore.FieldValue.increment(1),
+      totalEarnings: admin.firestore.FieldValue.increment(payOut),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } else {
+    tx.set(statsRef, {
+      month: currentMonth,
+      year: currentYear,
+      tasksRequested: 0,
+      tasksCompleted: 1,
+      totalEarnings: payOut,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+});
+
  const cooldownInfo = await checkAndSetCooldown(data.uid);
 
     if (timer?.sockets?.size) {
@@ -1066,8 +1188,8 @@ let aiScore = await weRTest(reference, userText, modelInstance);
   }
 
   break;
-
-
+  
+  
   case "cancelTask":
   if (!data.uid || !data.taskId) break;
 
