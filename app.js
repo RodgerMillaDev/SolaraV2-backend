@@ -748,7 +748,7 @@ case "requestTask":
   let pointsEarned = 0;
  if (aiScore >= 80) {
   const payPercent = aiScore / 100;
-  const fullPay = parseInt(taskSnap.data().pay, 10) || 0;
+  const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
    payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
   
   rewarded = true;
@@ -919,7 +919,7 @@ let aiScore = await weRTest(reference, userText, modelInstance);
 
  if (aiScore >= 70) {
   const payPercent = aiScore / 100;
-  const fullPay = parseInt(taskSnap.data().pay, 10) || 0;
+  const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
    payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
   rewarded = true;
   status = "Completed";
@@ -1087,7 +1087,7 @@ await firestore.runTransaction(async (tx) => {
 
   if (aiScore >= 70) {
   const payPercent = aiScore / 100;
-  const fullPay = parseInt(taskSnap.data().pay, 10) || 0;
+  const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
    payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
   rewarded = true;
   status = "Completed";
