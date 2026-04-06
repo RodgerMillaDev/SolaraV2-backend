@@ -703,20 +703,38 @@ case "requestTask":
 
       const language = "en-US";
 
-      const checkText = async (text) => {
-        const formData = new URLSearchParams();
-        formData.append("text", text);
-        formData.append("language", language);
+  const checkText = async (text) => {
+  try {
+    const formData = new URLSearchParams();
+    formData.append("text", text);
+    formData.append("language", language);
 
-        const res = await fetch("https://api.languagetool.org/v2/check", {
-          method: "POST",
-          body: formData,
-        });
+    const res = await fetch("https://api.languagetool.org/v2/check", {
+      method: "POST",
+      body: formData,
+    });
 
-        const result = await res.json();
-        return (result.matches || []).length;
-      };
+    // ✅ Check if response is OK
+    if (!res.ok) {
+      console.error(`LanguageTool API error: ${res.status} ${res.statusText}`);
+      return 0; // Return 0 errors as fallback
+    }
 
+    // ✅ Check content type before parsing JSON
+    const contentType = res.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      const errorText = await res.text();
+      console.error("LanguageTool returned non-JSON:", errorText.substring(0, 200));
+      return 0; // Return 0 errors as fallback
+    }
+
+    const result = await res.json();
+    return (result.matches || []).length;
+  } catch (error) {
+    console.error("checkText error:", error.message);
+    return 0; // Graceful fallback
+  }
+};
       const originalErrors = await checkText(data.originalText);
       const refinedErrors = await checkText(data.refinedText);
 
