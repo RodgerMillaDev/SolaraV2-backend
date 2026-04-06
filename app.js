@@ -911,7 +911,6 @@ let aiScore = await weRTest(reference, userText, modelInstance);
 
   if (!taskSnap.exists || !userSnap.exists) return;
   if (taskSnap.data().status === "Completed") return;
-
   const currentBalance = userSnap.data().accountBalance || 0;
   const currentPoints = userSnap.data().accountPoints || 0;
 
@@ -923,7 +922,6 @@ let aiScore = await weRTest(reference, userText, modelInstance);
    payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
   rewarded = true;
   status = "Completed";
-
   // 🎯 POINTS LOGIC
   pointsEarned = Math.floor(aiScore / 10);
 
@@ -1303,7 +1301,7 @@ case "startScreeningTimer":
     
     ws.send(JSON.stringify({
       type: "screeningTimerStarted",
-      remainingTime: duration,
+      remainingTime: durationScreen,
     }));
     
   } catch (error) {
