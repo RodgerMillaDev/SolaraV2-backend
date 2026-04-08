@@ -2114,3 +2114,165 @@ app.post('/compareFaces', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// Apply for job endpoint
+app.post('/apply-job', upload.single('cv'), async (req, res) => {
+  const { jobId, userId } = req.body;
+  const cvFile = req.file;
+  
+  // Validate required fields
+  if (!jobId) {
+    return res.status(400).json({ 
+      status: "error", 
+      message: "Job ID is required" 
+    });
+  }
+  
+  if (!userId) {
+    return res.status(400).json({ 
+      status: "error", 
+      message: "User ID is required" 
+    });
+  }
+  
+  if (!cvFile) {
+    return res.status(400).json({ 
+      status: "error", 
+      message: "CV file is required" 
+    });
+  }
+  
+  // Validate file type
+  const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+  if (!validTypes.includes(cvFile.mimetype)) {
+    return res.status(400).json({ 
+      status: "error", 
+      message: "Please upload a PDF or DOCX file" 
+    });
+  }
+  
+  // Validate file size (max 5MB)
+  const maxSize = 5 * 1024 * 1024;
+  if (cvFile.size > maxSize) {
+    return res.status(400).json({ 
+      status: "error", 
+      message: "File size must be less than 5MB" 
+    });
+  }
+  
+  try {
+    // Get user details from Firestore
+    const userRef = firestore.collection("Users").doc(userId);
+    const userSnap = await userRef.get();
+    
+    if (!userSnap.exists) {
+      return res.status(404).json({ 
+        status: "error", 
+        message: "User not found" 
+      });
+    }
+    
+    const userData = userSnap.data();
+    const userEmail = userData.em || userData.email;
+    const userName = userData.name || "User";
+    const currentTokens = userData.solaraTokens || 0;
+    
+    // ✅ Check if user has enough tokens
+    if (currentTokens < 10) {
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Insufficient tokens. You need 10 Solara tokens to apply for this job." 
+      });
+    }
+    
+    // Get job details (optional - if you have a jobs collection)
+    let jobTitle = "the position";
+    try {
+      const jobRef = firestore.collection("Jobs").doc(jobId);
+      const jobSnap = await jobRef.get();
+      if (jobSnap.exists) {
+        jobTitle = jobSnap.data().title || jobSnap.data().jobName || "the position";
+      }
+    } catch (err) {
+      console.log("Could not fetch job details:", err.message);
+    }
+    
+    // ✅ Run transaction to deduct tokens and save application
+    const applicationId = firestore.collection("JobApplications").doc().id;
+    const applicationRef = firestore.collection("JobApplications").doc(applicationId);
+    
+    await firestore.runTransaction(async (transaction) => {
+      // Get fresh user data within transaction
+      const freshUserSnap = await transaction.get(userRef);
+      const freshUserData = freshUserSnap.data();
+      const freshTokens = freshUserData.solaraTokens || 0;
+      
+      // Double-check token balance within transaction
+      if (freshTokens < 10) {
+        throw new Error("Insufficient tokens");
+      }
+      
+      // Deduct 10 tokens
+      transaction.update(userRef, {
+        solaraTokens: freshTokens - 10
+      });
+      
+      // Save application record
+      transaction.set(applicationRef, {
+        id: applicationId,
+        jobId: jobId,
+        userId: userId,
+        userName: userName,
+        userEmail: userEmail,
+        cvFileName: cvFile.originalname,
+        cvSize: cvFile.size,
+        cvType: cvFile.mimetype,
+        tokensDeducted: 10,
+        status: "pending",
+        appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    
+    // Optional: Send email notification
+    // await sendEmail({
+    //   to: userEmail,
+    //   subject: "Job Application Received",
+    //   html: `
+    //     <h3>Hello ${userName},</h3>
+    //     <p>Your application for ${jobTitle} has been received successfully.</p>
+    //     <p>10 Solara tokens have been deducted from your account.</p>
+    //     <p>We will review your CV and get back to you within 3-5 business days.</p>
+    //     <p>Thank you for your interest!</p>
+    //   `
+    // });
+    
+    // Return success response
+    return res.json({
+      status: "success",
+      message: "Your application has been submitted successfully. 10 Solara tokens have been deducted. You will receive a response via email within 3-5 business days.",
+      data: {
+        applicationId: applicationId,
+        jobId: jobId,
+        appliedAt: new Date().toISOString(),
+        status: "pending",
+        tokensRemaining: userData.solaraTokens - 10
+      }
+    });
+    
+  } catch (error) {
+    console.error("Application error:", error);
+    
+    if (error.message === "Insufficient tokens") {
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Insufficient tokens. You need 10 Solara tokens to apply for this job." 
+      });
+    }
+    
+    return res.status(500).json({ 
+      status: "error", 
+      message: "Something went wrong. Please try again later." 
+    });
+  }
+});
