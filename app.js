@@ -453,6 +453,20 @@ case "requestTask":
 
   const user = userSnap.data();
   const now = Date.now();
+  
+  // ✅ Determine user level
+  const getUserLevel = (accountPoints) => {
+    if (accountPoints >= 3500) return "Pro";
+    if (accountPoints >= 1000) return "Intermediate";
+    return "Noob";
+  };
+  
+  const userLevel = getUserLevel(user.accountPoints || 0);
+  const isProUser = userLevel === "Pro";
+  
+  // Set limits based on user level
+  const DAILY_LIMIT = isProUser ? 50 : 30;
+  const COOLDOWN_ENABLED = !isProUser; // Pro users have no cooldown
 
   // ❌ Not eligible
   if (!user.jobEligibility) {
@@ -464,8 +478,8 @@ case "requestTask":
     break;
   }
 
-  // ✅ Check if user is in cooldown
-  if (user.taskCooldownUntil && user.taskCooldownUntil.toMillis() > now) {
+  // ✅ Check if user is in cooldown (skip for Pro users)
+  if (COOLDOWN_ENABLED && user.taskCooldownUntil && user.taskCooldownUntil.toMillis() > now) {
     const remainingMinutes = Math.ceil((user.taskCooldownUntil.toMillis() - now) / 60000);
     const remainingHours = Math.floor(remainingMinutes / 60);
     const remainingMins = remainingMinutes % 60;
@@ -487,12 +501,14 @@ case "requestTask":
     break;
   }
 
-  // ❌ Daily limit reached
-  if (user.dailyTaskTaken >= 30) {
+  // ❌ Daily limit reached (higher for Pro users)
+  if (user.dailyTaskTaken >= DAILY_LIMIT) {
     ws.send(JSON.stringify({
       type: "taskResponse",
       status: "Limit Reached",
-      reason: "Sorry, you've reached your daily task limit!",
+      reason: isProUser 
+        ? "Sorry, you've reached your daily task limit of 50 tasks!"
+        : "Sorry, you've reached your daily task limit of 30 tasks!",
     }));
     break;
   }
@@ -534,7 +550,7 @@ case "requestTask":
     [availableTasks[i], availableTasks[j]] = [availableTasks[j], availableTasks[i]];
   }
 
-  const BATCH_SIZE = 10;
+  const BATCH_SIZE = isProUser ? 15 : 10; // Pro users get 15 tasks per batch
   const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
   
   let assignedTasks = [];
@@ -619,14 +635,20 @@ case "requestTask":
     }
   });
   
+  // Include user level in response
   ws.send(JSON.stringify({
     type: "taskResponse",
     status: "Success",
     tasks: assignedTasks.map(t => ({ taskId: t.taskId, type: t.type })),
-    message: `${tasksToAssign.length} tasks assigned. Complete them to unlock the next batch!`,
+    message: isProUser 
+      ? `${tasksToAssign.length} tasks assigned (Pro benefit: 50 tasks/day, no cooldown, larger batches!) Complete them to get more!`
+      : `${tasksToAssign.length} tasks assigned. Complete them to unlock the next batch!`,
+    userLevel: userLevel,
+    isProUser: isProUser,
   }));
   
   break;
+ 
   case "startTask":
   if (!data.userId || !data.taskId) break;
 
