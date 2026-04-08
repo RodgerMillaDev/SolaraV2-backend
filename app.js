@@ -7,6 +7,7 @@ const port = 3322;
 const app = express();
 const admin = require("firebase-admin");
 const https = require("https")
+const axios = require("axios")
 const deepl = require("deepl-node");
 
 const {
@@ -19,6 +20,8 @@ const multer = require("multer");
 const WebSocket = require("ws");
 
 app.use(cors({ origin: "*" }));
+
+
 app.get("/", (req, res) => {
   res.send("Alloo we are live my bwooy!");
 });
@@ -331,9 +334,6 @@ wss.on("connection", (ws) => {
 
     try {
       const data = JSON.parse(msg);
-      console.log(data);
-       console.log("this is the socket type: " + data.type)
-
         
      switch (data.type) {
 
@@ -1382,7 +1382,6 @@ case "startScreeningTimer":
       if (userConnections.get(ws.uid).size === 0) {
         userConnections.delete(ws.uid);
       }
-      console.log(`User ${ws.uid} disconnected`);
     }
   });
   ws.on("error", (err) => {
@@ -1605,7 +1604,7 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
     const uid = decodedToken.uid;
 
     // 📦 2. Get data (IGNORE uid & name from frontend)
-    const { amount } = req.body;
+    const { amount,withdrawMethod,bankDetails,cryptoDetails } = req.body;
 
     if (!amount) {
       return res.status(400).json({
@@ -1613,9 +1612,7 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
         msg: "Amount is required",
       });
     }
-
     const withdrawAmount = Number(amount);
-
     // 🧪 3. Validate amount
     if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
       return res.status(400).json({
@@ -1623,34 +1620,28 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
         msg: "Invalid amount",
       });
     }
-
     if (withdrawAmount < 50) {
       return res.status(400).json({
         status: 400,
         msg: "Minimum withdrawal is $50",
       });
     }
-
     if (withdrawAmount > 10000) {
       return res.status(400).json({
         status: 400,
         msg: "Maximum withdrawal is $10,000",
       });
     }
-
     // 🧾 4. Get user from Firestore
     const userRef = firestore.collection("Users").doc(uid);
     const userSnap = await userRef.get();
-
     if (!userSnap.exists) {
       return res.status(404).json({
         status: 404,
         msg: "User not found",
       });
     }
-
     const userData = userSnap.data();
-
     // 💰 5. Check balance
     if (!userData.accountBalance || userData.accountBalance < withdrawAmount) {
       return res.status(403).json({
@@ -1658,7 +1649,6 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
         msg: "Insufficient balance",
       });
     }
-
     // ⏱️ 6. Cooldown protection (1 minute)
     if (userData.lastWithdrawAt) {
       const now = Date.now();
@@ -1671,7 +1661,6 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
         });
       }
     }
-
     // 🚫 7. Prevent duplicate pending requests
     const existingRequest = await firestore
       .collection("WithdrawRequests")
@@ -1693,6 +1682,9 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
       name: userData.name, // ✅ always from DB
       amount: withdrawAmount,
       status: "pending",
+      withdrawMethod,
+      bankDetails,
+      cryptoDetails,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     const transactionRef = firestore
@@ -1703,6 +1695,9 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
 
 await transactionRef.set({
   amount: withdrawAmount,
+  bankDetails,
+  cryptoDetails,
+  withdrawMethod,
   type: "withdrawal",
   status: "pending",
   createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1843,8 +1838,7 @@ const verifyPaystackSignature = (req) => {
     .update(rawBody)
     .digest('hex');
   
-  console.log('Calculated hash:', hash);
-  console.log('Signature matches:', hash === signature);
+
   
   return hash === signature;
 };
@@ -1895,7 +1889,6 @@ app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (
         solaraTokens: admin.firestore.FieldValue.increment(purchase.tokens)
       });
       
-      console.log(`✅ Added ${purchase.tokens} Solara Tokens to user ${purchase.uid}`);
       
     } catch (error) {
       console.error('Webhook processing error:', error);
@@ -1909,11 +1902,8 @@ app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (
 app.post('/verify-payment', upload.none(), async (req, res) => {
   const { reference } = req.body;
   
-  console.log("🔍 Verification request received");
-  console.log("Reference:", reference);
   
   if (!reference) {
-    console.log("❌ No reference provided");
     return res.status(400).json({ error: 'Reference is required' });
   }
   
@@ -1983,7 +1973,6 @@ app.post('/verify-payment', upload.none(), async (req, res) => {
       tokensToAdd = Number(tokensToAdd);
       tokensToAdd = Math.round(tokensToAdd);
       
-      console.log(`💰 Adding ${tokensToAdd} tokens to user`);
       
       if (purchaseQuery.empty) {
         // Create purchase record
@@ -2008,7 +1997,6 @@ app.post('/verify-payment', upload.none(), async (req, res) => {
         await userRef.update({
           solaraTokens: admin.firestore.FieldValue.increment(tokensToAdd)
         });
-        console.log(`✅ Added ${tokensToAdd} tokens to user ${metadata?.uid}`);
       } else {
         console.log("⚠️ No tokens to add or missing UID");
       }
@@ -2025,4 +2013,82 @@ app.post('/verify-payment', upload.none(), async (req, res) => {
     console.error('Verification error:', error);
     res.status(500).json({ error: 'Verification failed: ' + error.message });
   }
+});
+
+
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+app.post('/extractIDdata', async (req, res) => {
+    const { base64ID } = req.body;
+    
+    if (!base64ID) {
+        return res.status(400).json({ error: 'Missing image data' });
+    }
+
+    // ✅ Remove any data:image/... prefix if present
+    const cleanBase64 = base64ID.replace(/^data:image\/\w+;base64,/, '');
+    
+    const options = {
+        method: 'POST',
+        url: 'https://id-document-recognition2.p.rapidapi.com/api/iddoc_base64',
+        headers: {
+            'x-rapidapi-key': '5143db4c77msh2c63df3a0683cc7p194ebfjsn474a41def10e',
+            'x-rapidapi-host': 'id-document-recognition2.p.rapidapi.com',
+            'Content-Type': 'application/json'  // ✅ Critical fix
+        },
+        data: {
+            image: cleanBase64  // Try without the data URL prefix
+        }
+    };
+    
+    try {
+        const response = await axios.request(options);
+        res.json(response.data);
+    } catch (error) {
+        console.error("ID extraction error:", error.response?.data || error.message);
+        res.status(500).json({ 
+            error: error.message,
+            details: error.response?.data 
+        });
+    }
+});
+app.post('/compareFaces', async (req, res) => {
+    // Try both possible field names
+    const base64selfie = req.body.base64selfie ;
+    const base64ID = req.body.base64ID || req.body.idImage || req.body.documentImage;
+    
+    console.log("Compare faces - Request body keys:", Object.keys(req.body));
+    
+    if (!base64selfie || !base64ID) {
+        return res.status(400).json({ 
+            error: 'Missing images', 
+            selfieProvided: !!base64selfie,
+            idProvided: !!base64ID
+        });
+    }
+
+    const options = {
+        method: 'POST',
+        url: 'https://face-recognition26.p.rapidapi.com/api/face_compare_base64',
+        headers: {
+            'x-rapidapi-key': '5143db4c77msh2c63df3a0683cc7p194ebfjsn474a41def10e',
+            'x-rapidapi-host': 'face-recognition26.p.rapidapi.com',
+            'Content-Type': 'application/json'
+        },
+        data: {
+            image1: base64selfie,
+            image2: base64ID
+        }
+    };
+    
+    try {
+        const response = await axios.request(options);
+        console.log("Face comparison successful");
+        res.json(response.data);   
+    } catch (error) {
+        console.error("Face comparison error:", error.message);
+        res.status(500).json({ error: error.message });
+    }
 });
