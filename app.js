@@ -6,8 +6,8 @@ const path = require("path");
 const port = 3322;
 const app = express();
 const admin = require("firebase-admin");
-const https = require("https")
-const axios = require("axios")
+const https = require("https");
+const axios = require("axios");
 const deepl = require("deepl-node");
 
 const {
@@ -21,7 +21,6 @@ const WebSocket = require("ws");
 
 app.use(cors({ origin: "*" }));
 
-
 app.get("/", (req, res) => {
   res.send("Alloo we are live my bwooy!");
 });
@@ -32,13 +31,15 @@ const upload = multer({
 const checkAndSetCooldown = async (userId) => {
   const userRef = firestore.collection("Users").doc(userId);
   const tasksRef = userRef.collection("assignedTasks");
-  
-  const pendingTasks = await tasksRef.where("status", "in", ["active", "Pending"]).get();
-  
+
+  const pendingTasks = await tasksRef
+    .where("status", "in", ["active", "Pending"])
+    .get();
+
   if (pendingTasks.empty) {
     const cooldownHours = 2;
     const cooldownUntil = new Date(Date.now() + cooldownHours * 60 * 60 * 1000);
-    
+
     // ✅ Delete ALL tasks in assignedTasks collection
     const allTasks = await tasksRef.get();
     const batch = firestore.batch();
@@ -46,14 +47,14 @@ const checkAndSetCooldown = async (userId) => {
       batch.delete(doc.ref);
     });
     await batch.commit();
-    
+
     // ✅ Update user document with cooldown
     await userRef.update({
       taskCooldownUntil: admin.firestore.Timestamp.fromDate(cooldownUntil),
       lastTaskBatchCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
       hasTasks: false,
     });
-    
+
     return { cooldownUntil, cooldownHours };
   }
   return null;
@@ -71,7 +72,6 @@ const wss = new WebSocket.Server({ server });
 
 let userConnections = new Map(); // uid -> set of ws
 
-
 let modelInstance = null;
 
 async function initModel() {
@@ -84,8 +84,6 @@ server.listen(port, async () => {
   console.log(`Hello Rodger you app is running on port ${port}`);
 });
 
-
-
 let extractor = null;
 
 // load model once
@@ -93,10 +91,7 @@ async function loadModel() {
   if (!extractor) {
     const { pipeline } = await import("@xenova/transformers");
 
-    extractor = await pipeline(
-      "feature-extraction",
-      "Xenova/all-MiniLM-L6-v2",
-    );
+    extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
 
     console.log("Embedding model loaded");
   }
@@ -121,12 +116,12 @@ function cosineSimilarity(a, b) {
 
 function normalize(vec) {
   const norm = Math.sqrt(vec.reduce((sum, x) => sum + x * x, 0));
-  return norm === 0 ? vec : vec.map(x => x / norm);
+  return norm === 0 ? vec : vec.map((x) => x / norm);
 }
 
 function meanPooling(tensor) {
   const data = tensor.data;
-  const [ , tokens, size ] = tensor.dims;
+  const [, tokens, size] = tensor.dims;
 
   const embedding = new Array(size).fill(0);
 
@@ -144,7 +139,7 @@ function meanPooling(tensor) {
 
   return embedding;
 }
-async function weRTest(reference, userText, modelInstance){ 
+async function weRTest(reference, userText, modelInstance) {
   const score = await scoreTexts(reference, userText, modelInstance);
 
   return score;
@@ -225,10 +220,12 @@ const startScreeningTimer = ({ ws, userId, testId, duration, startedAt }) => {
 
       sockets.forEach((s) => {
         if (s.readyState === WebSocket.OPEN) {
-          s.send(JSON.stringify({
-            type: "screeningTimerUpdate",
-            remainingTime: remaining,
-          }));
+          s.send(
+            JSON.stringify({
+              type: "screeningTimerUpdate",
+              remainingTime: remaining,
+            }),
+          );
         }
       });
 
@@ -246,9 +243,11 @@ const startScreeningTimer = ({ ws, userId, testId, duration, startedAt }) => {
 
         sockets.forEach((s) => {
           if (s.readyState === WebSocket.OPEN) {
-            s.send(JSON.stringify({
-              type: "screeningTimeExpired",
-            }));
+            s.send(
+              JSON.stringify({
+                type: "screeningTimeExpired",
+              }),
+            );
           }
         });
       }
@@ -331,1069 +330,1175 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
 wss.on("connection", (ws) => {
   // Expect client to send uid immediately
   ws.on("message", async (msg) => {
-
     try {
       const data = JSON.parse(msg);
-        
-     switch (data.type) {
 
-  case "init":
-    if (!data.uid) return;
+      switch (data.type) {
+        case "init":
+          if (!data.uid) return;
 
-    ws.uid = data.uid;
-    ws.taskId = data.taskId || null;
+          ws.uid = data.uid;
+          ws.taskId = data.taskId || null;
 
-    // 🚫 SINGLE DEVICE ENFORCEMENT
-    if (userConnections.has(ws.uid)) {
-      const existingSockets = userConnections.get(ws.uid);
+          // 🚫 SINGLE DEVICE ENFORCEMENT
+          if (userConnections.has(ws.uid)) {
+            const existingSockets = userConnections.get(ws.uid);
 
-      existingSockets.forEach((oldWs) => {
-        try {
-          oldWs.send(
-            JSON.stringify({
-              type: "forceLogout",
-              reason: "You logged in from another device",
-            })
+            existingSockets.forEach((oldWs) => {
+              try {
+                oldWs.send(
+                  JSON.stringify({
+                    type: "forceLogout",
+                    reason: "You logged in from another device",
+                  }),
+                );
+                oldWs.close();
+              } catch (e) {}
+            });
+
+            userConnections.delete(ws.uid);
+          }
+
+          // Register new socket
+          userConnections.set(ws.uid, new Set([ws]));
+
+          console.log(
+            `User ${ws.uid} connected, devices: ${userConnections.get(ws.uid).size}`,
           );
-          oldWs.close();
-        } catch (e) {}
-      });
 
-      userConnections.delete(ws.uid);
-    }
+          // ---------- 🔁 RESUME TASK IF PRESENT ----------
+          if (ws.taskId) {
+            try {
+              const taskRef = firestore
+                .collection("Users")
+                .doc(ws.uid)
+                .collection("assignedTasks")
+                .doc(ws.taskId);
 
-    // Register new socket
-    userConnections.set(ws.uid, new Set([ws]));
+              const snap = await taskRef.get();
+              const task = snap.data();
 
-    console.log(
-      `User ${ws.uid} connected, devices: ${userConnections.get(ws.uid).size}`
-    );
+              if (!task) {
+                ws.send(
+                  JSON.stringify({
+                    type: "resumeError",
+                    reason: "Task not found or unauthorized",
+                  }),
+                );
+                return;
+              }
 
-    // ---------- 🔁 RESUME TASK IF PRESENT ----------
-    if (ws.taskId) {
-      try {
-        const taskRef = firestore
-          .collection("Users")
-          .doc(ws.uid)
-          .collection("assignedTasks")
-          .doc(ws.taskId);
+              if (task.status === "Complete") {
+                ws.send(JSON.stringify({ type: "taskComplete" }));
+                return;
+              }
 
-        const snap = await taskRef.get();
-        const task = snap.data();
+              const now = Date.now();
+              const elapsed = Math.floor(
+                (now - task.assignedAt.toMillis()) / 1000,
+              );
+              const remaining = Math.max(task.durationSec - elapsed, 0);
 
-        if (!task) {
-          ws.send(JSON.stringify({
-            type: "resumeError",
-            reason: "Task not found or unauthorized",
+              // 1️⃣ Send immediate remaining time
+              ws.send(
+                JSON.stringify({
+                  type: "timerUpdate",
+                  remainingTime: remaining,
+                }),
+              );
+
+              console.log(
+                `Resumed task ${ws.taskId} for user ${ws.uid}, remaining ${remaining}s`,
+              );
+
+              // 2️⃣ Attach socket to active timer OR start new one
+              const key = `${ws.uid}_${ws.taskId}`;
+
+              if (activeTaskTimers.has(key)) {
+                activeTaskTimers.get(key).sockets.add(ws);
+              } else {
+                startTaskTimer({
+                  ws,
+                  userId: ws.uid,
+                  taskId: ws.taskId,
+                  duration: task.durationSec,
+                  startedAt: task.assignedAt.toMillis(),
+                });
+              }
+            } catch (err) {
+              console.error("Resume failed:", err);
+
+              ws.send(
+                JSON.stringify({
+                  type: "resumeError",
+                  reason: err.message,
+                }),
+              );
+            }
+          }
+
+          break;
+        case "requestTask":
+          if (!data.uid) return;
+
+          const userRef = firestore.collection("Users").doc(data.uid);
+          const userSnap = await userRef.get();
+
+          if (!userSnap.exists) {
+            ws.send(
+              JSON.stringify({
+                type: "taskResponse",
+                status: "Error",
+                reason: "An error occurred. Try again later.",
+              }),
+            );
+            break;
+          }
+
+          const user = userSnap.data();
+          const now = Date.now();
+
+          // ✅ Determine user level
+          const getUserLevel = (accountPoints) => {
+            if (accountPoints >= 3500) return "Pro";
+            if (accountPoints >= 1000) return "Intermediate";
+            return "Noob";
+          };
+
+          const userLevel = getUserLevel(user.accountPoints || 0);
+          const isProUser = userLevel === "Pro";
+
+          // Set limits based on user level
+          const DAILY_LIMIT = isProUser ? 50 : 30;
+          const COOLDOWN_ENABLED = !isProUser; // Pro users have no cooldown
+
+          // ❌ Not eligible
+          if (!user.jobEligibility) {
+            ws.send(
+              JSON.stringify({
+                type: "taskResponse",
+                status: "Not Eligible",
+                reason: "You are not eligible for tasks at the moment.",
+              }),
+            );
+            break;
+          }
+
+          // ✅ Check if user is in cooldown (skip for Pro users)
+          if (
+            COOLDOWN_ENABLED &&
+            user.taskCooldownUntil &&
+            user.taskCooldownUntil.toMillis() > now
+          ) {
+            const remainingMinutes = Math.ceil(
+              (user.taskCooldownUntil.toMillis() - now) / 60000,
+            );
+            const remainingHours = Math.floor(remainingMinutes / 60);
+            const remainingMins = remainingMinutes % 60;
+
+            let timeMessage = "";
+            if (remainingHours > 0) {
+              timeMessage = `${remainingHours} hour${remainingHours > 1 ? "s" : ""}`;
+              if (remainingMins > 0)
+                timeMessage += ` and ${remainingMins} minute${remainingMins > 1 ? "s" : ""}`;
+            } else {
+              timeMessage = `${remainingMinutes} minute${remainingMinutes > 1 ? "s" : ""}`;
+            }
+
+            ws.send(
+              JSON.stringify({
+                type: "taskResponse",
+                status: "Cooldown",
+                reason: `New tasks available in ${timeMessage}. Complete your current tasks first!`,
+                remainingTime: user.taskCooldownUntil.toMillis() - now,
+              }),
+            );
+            break;
+          }
+
+          // ❌ Daily limit reached (higher for Pro users)
+          if (user.dailyTaskTaken >= DAILY_LIMIT) {
+            ws.send(
+              JSON.stringify({
+                type: "taskResponse",
+                status: "Limit Reached",
+                reason: isProUser
+                  ? "Sorry, you've reached your daily task limit of 50 tasks!"
+                  : "Sorry, you've reached your daily task limit of 30 tasks!",
+              }),
+            );
+            break;
+          }
+
+          // ❌ Already working on a task
+          if (user.taskID) {
+            ws.send(
+              JSON.stringify({
+                type: "taskResponse",
+                status: "Denied",
+                reason: "You have already been assigned an AI task.",
+              }),
+            );
+            break;
+          }
+
+          // ✅ USER IS ELIGIBLE → FETCH TASKS
+          const taskQuery = await firestore
+            .collection("Ai-tasks")
+            .where("status", "==", "active")
+            .get();
+
+          if (taskQuery.empty) {
+            ws.send(
+              JSON.stringify({
+                type: "taskResponse",
+                status: "No Tasks Available",
+                reason:
+                  "Sorry, we have no tasks at the moment. Try again later.",
+              }),
+            );
+            break;
+          }
+
+          // Convert to array and shuffle
+          const availableTasks = taskQuery.docs.map((doc) => ({
+            taskId: doc.id,
+            ...doc.data(),
           }));
-          return;
-        }
 
-        if (task.status === "Complete") {
-          ws.send(JSON.stringify({ type: "taskComplete" }));
-          return;
-        }
+          // Fisher-Yates shuffle for randomness
+          for (let i = availableTasks.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [availableTasks[i], availableTasks[j]] = [
+              availableTasks[j],
+              availableTasks[i],
+            ];
+          }
 
-        const now = Date.now();
-        const elapsed = Math.floor(
-          (now - task.assignedAt.toMillis()) / 1000
-        );
-        const remaining = Math.max(task.durationSec - elapsed, 0);
+          const BATCH_SIZE = isProUser ? 15 : 10; // Pro users get 15 tasks per batch
+          const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
 
-        // 1️⃣ Send immediate remaining time
-        ws.send(JSON.stringify({
-          type: "timerUpdate",
-          remainingTime: remaining,
-        }));
+          let assignedTasks = [];
 
-        console.log(
-          `Resumed task ${ws.taskId} for user ${ws.uid}, remaining ${remaining}s`
-        );
+          await admin.firestore().runTransaction(async (tx) => {
+            tx.update(userRef, {
+              dailyTaskTaken: admin.firestore.FieldValue.increment(
+                tasksToAssign.length,
+              ),
+            });
 
-        // 2️⃣ Attach socket to active timer OR start new one
-        const key = `${ws.uid}_${ws.taskId}`;
+            for (const task of tasksToAssign) {
+              const taskRef = firestore.collection("Ai-tasks").doc(task.taskId);
+              tx.update(taskRef, {
+                assignCount: admin.firestore.FieldValue.increment(1),
+                assignedTo: data.uid,
+              });
 
-        if (activeTaskTimers.has(key)) {
-          activeTaskTimers.get(key).sockets.add(ws);
-        } else {
-          startTaskTimer({
-            ws,
-            userId: ws.uid,
-            taskId: ws.taskId,
-            duration: task.durationSec,
-            startedAt: task.assignedAt.toMillis(),
+              assignedTasks.push({
+                taskId: task.taskId,
+                instructions: task.instructions,
+                pay: task.pay,
+                status: "Pending",
+                type: task.type,
+                mainTask: task,
+              });
+            }
           });
-        }
 
-      } catch (err) {
-        console.error("Resume failed:", err);
+          // Save tasks in batch
+          const batch = firestore.batch();
+          for (const task of assignedTasks) {
+            const taskRef = firestore
+              .collection("Users")
+              .doc(data.uid)
+              .collection("assignedTasks")
+              .doc(task.taskId);
 
-        ws.send(JSON.stringify({
-          type: "resumeError",
-          reason: err.message,
-        }));
-      }
-    }
+            batch.set(taskRef, {
+              taskId: task.taskId,
+              task: task,
+              type: task.type,
+              pay: task.pay,
+              instructions: task.instructions,
+              status: task.status,
+              assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+              batchNumber: user.totalCompletedTasks
+                ? Math.floor(user.totalCompletedTasks / BATCH_SIZE) + 1
+                : 1,
+            });
+          }
 
-    break;
-case "requestTask":
-  if (!data.uid) return;
-  
-  const userRef = firestore.collection("Users").doc(data.uid);
-  const userSnap = await userRef.get();
+          await batch.commit();
 
-  if (!userSnap.exists) {
-    ws.send(JSON.stringify({
-      type: "taskResponse",
-      status: "Error",
-      reason: "An error occurred. Try again later.",
-    }));
-    break;
-  }
+          await firestore.collection("Users").doc(data.uid).update({
+            hasTasks: true,
+          });
 
-  const user = userSnap.data();
-  const now = Date.now();
-  
-  // ✅ Determine user level
-  const getUserLevel = (accountPoints) => {
-    if (accountPoints >= 3500) return "Pro";
-    if (accountPoints >= 1000) return "Intermediate";
-    return "Noob";
-  };
-  
-  const userLevel = getUserLevel(user.accountPoints || 0);
-  const isProUser = userLevel === "Pro";
-  
-  // Set limits based on user level
-  const DAILY_LIMIT = isProUser ? 50 : 30;
-  const COOLDOWN_ENABLED = !isProUser; // Pro users have no cooldown
+          // ✅ UPDATE STATISTICS - tasksRequested
+          const monthNames = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+          ];
+          const currentMonth = monthNames[new Date().getMonth()];
+          const currentYear = new Date().getFullYear();
+          const statsRef = firestore
+            .collection("Users")
+            .doc(data.uid)
+            .collection("taskStats")
+            .doc(`${currentYear}_${currentMonth}`);
 
-  // ❌ Not eligible
-  if (!user.jobEligibility) {
-    ws.send(JSON.stringify({
-      type: "taskResponse",
-      status: "Not Eligible",
-      reason: "You are not eligible for tasks at the moment.",
-    }));
-    break;
-  }
+          await firestore.runTransaction(async (tx) => {
+            const statsSnap = await tx.get(statsRef);
 
-  // ✅ Check if user is in cooldown (skip for Pro users)
-  if (COOLDOWN_ENABLED && user.taskCooldownUntil && user.taskCooldownUntil.toMillis() > now) {
-    const remainingMinutes = Math.ceil((user.taskCooldownUntil.toMillis() - now) / 60000);
-    const remainingHours = Math.floor(remainingMinutes / 60);
-    const remainingMins = remainingMinutes % 60;
-    
-    let timeMessage = "";
-    if (remainingHours > 0) {
-      timeMessage = `${remainingHours} hour${remainingHours > 1 ? 's' : ''}`;
-      if (remainingMins > 0) timeMessage += ` and ${remainingMins} minute${remainingMins > 1 ? 's' : ''}`;
-    } else {
-      timeMessage = `${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}`;
-    }
-    
-    ws.send(JSON.stringify({
-      type: "taskResponse",
-      status: "Cooldown",
-      reason: `New tasks available in ${timeMessage}. Complete your current tasks first!`,
-      remainingTime: user.taskCooldownUntil.toMillis() - now,
-    }));
-    break;
-  }
+            if (statsSnap.exists) {
+              tx.update(statsRef, {
+                tasksRequested: admin.firestore.FieldValue.increment(
+                  tasksToAssign.length,
+                ),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+            } else {
+              tx.set(statsRef, {
+                month: currentMonth,
+                year: currentYear,
+                tasksRequested: tasksToAssign.length,
+                tasksCompleted: 0,
+                totalEarnings: 0,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+            }
+          });
 
-  // ❌ Daily limit reached (higher for Pro users)
-  if (user.dailyTaskTaken >= DAILY_LIMIT) {
-    ws.send(JSON.stringify({
-      type: "taskResponse",
-      status: "Limit Reached",
-      reason: isProUser 
-        ? "Sorry, you've reached your daily task limit of 50 tasks!"
-        : "Sorry, you've reached your daily task limit of 30 tasks!",
-    }));
-    break;
-  }
-
-  // ❌ Already working on a task
-  if (user.taskID) {
-    ws.send(JSON.stringify({
-      type: "taskResponse",
-      status: "Denied",
-      reason: "You have already been assigned an AI task.",
-    }));
-    break;
-  }
-
-  // ✅ USER IS ELIGIBLE → FETCH TASKS
-  const taskQuery = await firestore
-    .collection("Ai-tasks")
-    .where("status", "==", "active")
-    .get();
-
-  if (taskQuery.empty) {
-    ws.send(JSON.stringify({
-      type: "taskResponse",
-      status: "No Tasks Available",
-      reason: "Sorry, we have no tasks at the moment. Try again later.",
-    }));
-    break;
-  }
-
-  // Convert to array and shuffle
-  const availableTasks = taskQuery.docs.map((doc) => ({
-    taskId: doc.id,
-    ...doc.data(),
-  }));
-
-  // Fisher-Yates shuffle for randomness
-  for (let i = availableTasks.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [availableTasks[i], availableTasks[j]] = [availableTasks[j], availableTasks[i]];
-  }
-
-  const BATCH_SIZE = isProUser ? 15 : 10; // Pro users get 15 tasks per batch
-  const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
-  
-  let assignedTasks = [];
-
-  await admin.firestore().runTransaction(async (tx) => {
-    tx.update(userRef, {
-      dailyTaskTaken: admin.firestore.FieldValue.increment(tasksToAssign.length),
-    });
-
-    for (const task of tasksToAssign) {
-      const taskRef = firestore.collection("Ai-tasks").doc(task.taskId);
-      tx.update(taskRef, {
-        assignCount: admin.firestore.FieldValue.increment(1),
-        assignedTo: data.uid,
-      });
-
-      assignedTasks.push({
-        taskId: task.taskId,
-        instructions: task.instructions,
-        pay: task.pay,
-        status: "Pending",
-        type: task.type,
-        mainTask: task,
-      });
-    }
-  });
-
-  // Save tasks in batch
-  const batch = firestore.batch();
-  for (const task of assignedTasks) {
-    const taskRef = firestore
-      .collection("Users")
-      .doc(data.uid)
-      .collection("assignedTasks")
-      .doc(task.taskId);
-
-    batch.set(taskRef, {
-      taskId: task.taskId,
-      task: task,
-      type: task.type,
-      pay: task.pay,
-      instructions: task.instructions,
-      status: task.status,
-      assignedAt: admin.firestore.FieldValue.serverTimestamp(),
-      batchNumber: user.totalCompletedTasks ? Math.floor(user.totalCompletedTasks / BATCH_SIZE) + 1 : 1,
-    });
-  }
-  
-  await batch.commit();
-  
-  await firestore.collection("Users").doc(data.uid).update({
-    hasTasks: true,
-  });
-  
-  // ✅ UPDATE STATISTICS - tasksRequested
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const currentMonth = monthNames[new Date().getMonth()];
-  const currentYear = new Date().getFullYear();
-  const statsRef = firestore
-    .collection("Users")
-    .doc(data.uid)
-    .collection("taskStats")
-    .doc(`${currentYear}_${currentMonth}`);
-  
-  await firestore.runTransaction(async (tx) => {
-    const statsSnap = await tx.get(statsRef);
-    
-    if (statsSnap.exists) {
-      tx.update(statsRef, {
-        tasksRequested: admin.firestore.FieldValue.increment(tasksToAssign.length),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    } else {
-      tx.set(statsRef, {
-        month: currentMonth,
-        year: currentYear,
-        tasksRequested: tasksToAssign.length,
-        tasksCompleted: 0,
-        totalEarnings: 0,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    }
-  });
-  
-  // Include user level in response
-  ws.send(JSON.stringify({
-    type: "taskResponse",
-    status: "Success",
-    tasks: assignedTasks.map(t => ({ taskId: t.taskId, type: t.type })),
-    message: isProUser 
-      ? `${tasksToAssign.length} tasks assigned (Pro benefit: 50 tasks/day, no cooldown, larger batches!) Complete them to get more!`
-      : `${tasksToAssign.length} tasks assigned. Complete them to unlock the next batch!`,
-    userLevel: userLevel,
-    isProUser: isProUser,
-  }));
-  
-  break;
- 
-  case "startTask":
-  if (!data.userId || !data.taskId) break;
-
-  const duration = 900; // seconds
-
-  const taskRef = firestore
-    .collection("Users")
-    .doc(data.userId)
-    .collection("assignedTasks")
-    .doc(data.taskId);
-
-  try {
-    // 1️⃣ Update Firestore FIRST
-    await taskRef.update({
-      status: "active",
-      assignedAt: serverTimestamp(),
-      durationSec: duration,
-    });
-
-    console.log("Task started for:", data.userId);
-
-    // 2️⃣ READ BACK server timestamp (CRITICAL)
-    const snap = await taskRef.get();
-
-    if (!snap.exists) {
-      throw new Error("Task document not found after update");
-    }
-
-    const startedAt = snap.data().assignedAt.toMillis();
-
-    // 3️⃣ START SERVER TIMER ⏱️
-    startTaskTimer({
-      ws,
-      userId: data.userId,
-      taskId: data.taskId,
-      duration,
-      startedAt,
-    });
-
-    // 4️⃣ Respond to client
-    ws.send(
-      JSON.stringify({
-        type: "startTaskResponse",
-        msg: "You are ready to begin",
-      }),
-    );
-  } catch (error) {
-    console.error("Task launch failed:", error);
-
-    ws.send(
-      JSON.stringify({
-        type: "startTaskError",
-        msg: "Sorry, an error occurred when starting the task",
-      }),
-    );
-  }
-
-
-  break;
-  case "submitTask":
-
-  if (!data.uid || !data.taskId || !data.taskType) break;
-
-  if (data.taskType == "Content Review") {
-    const key = `${data.uid}_${data.taskId}`;
-    let timer;
-    let payOut=0;
-
-    try {
-      if (activeTaskTimers.has(key)) {
-        timer = activeTaskTimers.get(key);
-        clearInterval(timer.intervalId);
-      }
-
-      const language = "en-US";
-
-  const checkText = async (text) => {
-  try {
-    const formData = new URLSearchParams();
-    formData.append("text", text);
-    formData.append("language", language);
-
-    const res = await fetch("https://api.languagetool.org/v2/check", {
-      method: "POST",
-      body: formData,
-    });
-
-    // ✅ Check if response is OK
-    if (!res.ok) {
-      console.error(`LanguageTool API error: ${res.status} ${res.statusText}`);
-      return 0; // Return 0 errors as fallback
-    }
-
-    // ✅ Check content type before parsing JSON
-    const contentType = res.headers.get("content-type");
-    if (!contentType || !contentType.includes("application/json")) {
-      const errorText = await res.text();
-      console.error("LanguageTool returned non-JSON:", errorText.substring(0, 200));
-      return 0; // Return 0 errors as fallback
-    }
-
-    const result = await res.json();
-    return (result.matches || []).length;
-  } catch (error) {
-    console.error("checkText error:", error.message);
-    return 0; // Graceful fallback
-  }
-};
-      const originalErrors = await checkText(data.originalText);
-      const refinedErrors = await checkText(data.refinedText);
-
-      let aiScore =
-        100 - refinedErrors * 10 + (originalErrors - refinedErrors) * 5;
-      aiScore = Math.max(0, Math.min(100, aiScore));
-
-      const userRef = firestore.collection("Users").doc(data.uid);
-      const taskRef = userRef
-        .collection("assignedTasks")
-        .doc(data.taskId);
-
-      let cash = 0;
-      let rewarded = false;
-      let status = "Failed";
-
-   await firestore.runTransaction(async (tx) => {
-  const [taskSnap, userSnap] = await Promise.all([
-    tx.get(taskRef),
-    tx.get(userRef),
-  ]);
-
-  if (!taskSnap.exists || !userSnap.exists) return;
-  if (taskSnap.data().status === "Completed") return;
-
-  const currentBalance = userSnap.data().accountBalance || 0;
-  const currentPoints = userSnap.data().accountPoints || 0;
-
-  let pointsEarned = 0;
- if (aiScore >= 80) {
-  const payPercent = aiScore / 100;
-  const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
-   payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
-  
-  rewarded = true;
-  status = "Completed";
-
-  // 🎯 POINTS LOGIC
-  pointsEarned = Math.floor(aiScore / 10); // e.g. 85 → 8 points
-
-  tx.update(taskRef, {
-    aiScore,
-    reviewedAt: Date.now(),
-    status,
-    rewarded: true,
-    pointsEarned,
-    fullPay,        // Store original amount
-    payOut,         // Store what they actually got
-    payPercent,     // Store percentage
-  });
-
-  tx.update(userRef, {
-  accountBalance: Math.round((currentBalance + payOut) * 100) / 100,
-    accountPoints: currentPoints + pointsEarned,
-  });
-}else {
-    tx.update(taskRef, {
-      aiScore,
-      reviewedAt: Date.now(),
-      status,
-      rewarded: false,
-    });
-  }
-});
-
-const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const currentMonth = monthNames[new Date().getMonth()];
-const currentYear = new Date().getFullYear();
-const statsRef = firestore
-  .collection("Users")
-  .doc(data.uid)
-  .collection("taskStats")
-  .doc(`${currentYear}_${currentMonth}`);
-
-await firestore.runTransaction(async (tx) => {
-  const statsSnap = await tx.get(statsRef);
-  
-  if (statsSnap.exists) {
-    tx.update(statsRef, {
-      tasksCompleted: admin.firestore.FieldValue.increment(1),
-      totalEarnings: admin.firestore.FieldValue.increment(payOut),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  } else {
-    tx.set(statsRef, {
-      month: currentMonth,
-      year: currentYear,
-      tasksRequested: 0,
-      tasksCompleted: 1,
-      totalEarnings: payOut,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  }
-});
-
-
-
-
-  const cooldownInfo = await checkAndSetCooldown(data.uid);
-
-    if (timer?.sockets?.size) {
-      timer.sockets.forEach((s) => {
-        if (s.readyState === WebSocket.OPEN) {
-          s.send(
+          // Include user level in response
+          ws.send(
             JSON.stringify({
-              type: "taskComplete",
-              taskId: data.taskId,
-              aiScore,
-              payOut,  // ✅ USE payOut (not cash)
-              rewarded,
-              status,
-              completeMethod: "Instant",
-              cooldown: cooldownInfo, // ✅ SEND cooldown info
+              type: "taskResponse",
+              status: "Success",
+              tasks: assignedTasks.map((t) => ({
+                taskId: t.taskId,
+                type: t.type,
+              })),
+              message: isProUser
+                ? `${tasksToAssign.length} tasks assigned (Pro benefit: 50 tasks/day, no cooldown, larger batches!) Complete them to get more!`
+                : `${tasksToAssign.length} tasks assigned. Complete them to unlock the next batch!`,
+              userLevel: userLevel,
+              isProUser: isProUser,
             }),
           );
-        }
-      });
-    }
 
-    activeTaskTimers.delete(key);
-    } catch (error) {
-      console.error("Error processing task:", error.message);
+          break;
 
-      if (timer?.sockets?.size) {
-        timer.sockets.forEach((s) => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(
-              JSON.stringify({
-                type: "taskError",
-                taskId: data.taskId,
-                error: error.message || "Task processing failed",
-              }),
-            );
-          }
-        });
-      }
-    }
-  }
+        case "startTask":
+          if (!data.userId || !data.taskId) break;
 
-  if (data.taskType === "Content Translation") {
-    const key = `${data.uid}_${data.taskId}`;
-    let timer;
-    let payOut = 0;
+          const duration = 900; // seconds
 
-    try {
+          const taskRef = firestore
+            .collection("Users")
+            .doc(data.userId)
+            .collection("assignedTasks")
+            .doc(data.taskId);
 
-
-      if (!modelInstance) {
-  console.log("Model not ready yet");
-
-  if (timer?.sockets?.size) {
-    timer.sockets.forEach((s) => {
-      if (s.readyState === WebSocket.OPEN) {
-        s.send(
-          JSON.stringify({
-            type: "taskError",
-            taskId: data.taskId,
-            error: "System warming up, try again in a few seconds",
-          })
-        );
-      }
-    });
-  }
-
-  return;
-       }
-
-
-      if (activeTaskTimers.has(key)) {
-        timer = activeTaskTimers.get(key);
-        clearInterval(timer.intervalId);
-      }
-      const reference = data.textotranslate ;
-      const userText = data.translatedText;
-      if (!reference || !userText) throw new Error("Invalid input");
-   
-let aiScore = await weRTest(reference, userText, modelInstance);
-      const userRef = firestore.collection("Users").doc(data.uid);
-      const taskRef = userRef
-        .collection("assignedTasks")
-        .doc(data.taskId);
-
-      let cash = 0;
-      let rewarded = false;
-      let status = "Failed";
-
-   await firestore.runTransaction(async (tx) => {
-  const [taskSnap, userSnap] = await Promise.all([
-    tx.get(taskRef),
-    tx.get(userRef),
-  ]);
-
-  if (!taskSnap.exists || !userSnap.exists) return;
-  if (taskSnap.data().status === "Completed") return;
-  const currentBalance = userSnap.data().accountBalance || 0;
-  const currentPoints = userSnap.data().accountPoints || 0;
-
-  let pointsEarned = 0;
-
- if (aiScore >= 70) {
-  const payPercent = aiScore / 100;
-  const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
-   payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
-  rewarded = true;
-  status = "Completed";
-  // 🎯 POINTS LOGIC
-  pointsEarned = Math.floor(aiScore / 10);
-
-  tx.update(taskRef, {
-    aiScore,
-    reviewedAt: Date.now(),
-    status,
-    rewarded: true,
-    pointsEarned,
-    fullPay,
-    payOut,
-    payPercent,
-  });
-
-  tx.update(userRef, {
-  accountBalance: Math.round((currentBalance + payOut) * 100) / 100,
-    accountPoints: currentPoints + pointsEarned,
-  });
-} else {
-    tx.update(taskRef, {
-      aiScore,
-      reviewedAt: Date.now(),
-      status,
-      rewarded: false,
-    });
-  }
-});
-
-const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const currentMonth = monthNames[new Date().getMonth()];
-const currentYear = new Date().getFullYear();
-const statsRef = firestore
-  .collection("Users")
-  .doc(data.uid)
-  .collection("taskStats")
-  .doc(`${currentYear}_${currentMonth}`);
-
-await firestore.runTransaction(async (tx) => {
-  const statsSnap = await tx.get(statsRef);
-  
-  if (statsSnap.exists) {
-    tx.update(statsRef, {
-      tasksCompleted: admin.firestore.FieldValue.increment(1),
-      totalEarnings: admin.firestore.FieldValue.increment(payOut),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  } else {
-    tx.set(statsRef, {
-      month: currentMonth,
-      year: currentYear,
-      tasksRequested: 0,
-      tasksCompleted: 1,
-      totalEarnings: payOut,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  }
-});
-
-
-  const cooldownInfo = await checkAndSetCooldown(data.uid);
-
-    if (timer?.sockets?.size) {
-      timer.sockets.forEach((s) => {
-        s.send(JSON.stringify({
-          type: "taskComplete",
-          taskId: data.taskId,
-          aiScore,
-          payOut,  // ✅ USE payOut
-          rewarded,
-          status,
-          completeMethod: "Instant",
-          cooldown: cooldownInfo,
-        }));
-      });
-    }
-      activeTaskTimers.delete(key);
-    } catch (error) {
-      console.error("Error processing translation task:", error.message);
-
-      if (timer?.sockets?.size) {
-        timer.sockets.forEach((s) => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(
-              JSON.stringify({
-                type: "taskError",
-                taskId: data.taskId,
-                error: error.message || "Task processing failed",
-              }),
-            );
-          }
-        });
-      }
-    }
-  }
-
-  if (data.taskType === "Fact Check") {
-    const key = `${data.uid}_${data.taskId}`;
-    let timer;
-        let payOut = 0;
-
-
-    try {
-      if (activeTaskTimers.has(key)) {
-        timer = activeTaskTimers.get(key);
-        clearInterval(timer.intervalId);
-      }
-
-      const correctVerdict = data.originalverdict;
-      const userVerdict = data.userVerdict;
-
-      const correctExplanation = data.originalExplanation;
-      const userExplanation = data.userExplanation;
-
-
-      let verdictScore = 0;
-
-      if (
-        correctVerdict.toLowerCase().trim() ===
-        userVerdict.toLowerCase().trim()
-      ) {
-        verdictScore = 50;
-      }
-
-      const emb1 = await modelInstance(correctExplanation);
-      const emb2 = await modelInstance(userExplanation);
-
-      const vec1 = meanPooling(emb1);
-      const vec2 = meanPooling(emb2);
-
-      const similarity = cosineSimilarity(vec1, vec2);
-      const explanationScore = similarity * 40;
-
-      const grammarErr = await grammarErrors(userExplanation);
-      const grammarScore = Math.max(0, 10 - grammarErr * 2);
-
-      let aiScore = verdictScore + explanationScore + grammarScore;
-      aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
-
-      const userRef = firestore.collection("Users").doc(data.uid);
-      const taskRef = userRef
-        .collection("assignedTasks")
-        .doc(data.taskId);
-
-      let cash = 0;
-      let rewarded = false;
-      let status = "Failed";
-
-      await firestore.runTransaction(async (tx) => {
-  const [taskSnap, userSnap] = await Promise.all([
-    tx.get(taskRef),
-    tx.get(userRef),
-  ]);
-
-  if (!taskSnap.exists || !userSnap.exists) return;
-  if (taskSnap.data().status === "Completed") return;
-
-  const currentBalance = userSnap.data().accountBalance || 0;
-  const currentPoints = userSnap.data().accountPoints || 0;
-
-  let pointsEarned = 0;
-
-  if (aiScore >= 70) {
-  const payPercent = aiScore / 100;
-  const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
-   payOut = Math.round((fullPay * payPercent) * 100) / 100;  // ✅ Rounds to 2 decimals
-  rewarded = true;
-  status = "Completed";
-
-  // 🎯 POINTS LOGIC
-  pointsEarned = Math.floor(aiScore / 10);
-
-  tx.update(taskRef, {
-    aiScore,
-    reviewedAt: Date.now(),
-    status,
-    rewarded: true,
-    pointsEarned,
-    fullPay,
-    payOut,
-    payPercent,
-  });
-
-  tx.update(userRef, {
-    accountBalance: Math.round((currentBalance + payOut) * 100) / 100,
-    accountPoints: currentPoints + pointsEarned,
-  });
-}else {
-    tx.update(taskRef, {
-      aiScore,
-      reviewedAt: Date.now(),
-      status,
-      rewarded: false,
-    });
-  }
-});
-
-const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const currentMonth = monthNames[new Date().getMonth()];
-const currentYear = new Date().getFullYear();
-const statsRef = firestore
-  .collection("Users")
-  .doc(data.uid)
-  .collection("taskStats")
-  .doc(`${currentYear}_${currentMonth}`);
-
-await firestore.runTransaction(async (tx) => {
-  const statsSnap = await tx.get(statsRef);
-  
-  if (statsSnap.exists) {
-    tx.update(statsRef, {
-      tasksCompleted: admin.firestore.FieldValue.increment(1),
-      totalEarnings: admin.firestore.FieldValue.increment(payOut),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  } else {
-    tx.set(statsRef, {
-      month: currentMonth,
-      year: currentYear,
-      tasksRequested: 0,
-      tasksCompleted: 1,
-      totalEarnings: payOut,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  }
-});
-
- const cooldownInfo = await checkAndSetCooldown(data.uid);
-
-    if (timer?.sockets?.size) {
-      timer.sockets.forEach((s) => {
-        s.send(JSON.stringify({
-          type: "taskComplete",
-          taskId: data.taskId,
-          aiScore,
-          payOut,  // ✅ USE payOut
-          rewarded,
-          status,
-          completeMethod: "Instant",
-          cooldown: cooldownInfo,
-        }));
-      });
-    }
-
-      activeTaskTimers.delete(key);
-    } catch (error) {
-      console.error("Error processing fact check task:", error.message);
-
-      if (timer?.sockets?.size) {
-        timer.sockets.forEach((s) => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(
-              JSON.stringify({
-                type: "taskError",
-                taskId: data.taskId,
-                error: error.message || "Task processing failed",
-              }),
-            );
-          }
-        });
-      }
-    }
-  }
-
-  break;
-  
-  
-  case "cancelTask":
-  if (!data.uid || !data.taskId) break;
-
-  try {
-    const key = `${data.uid}_${data.taskId}`;
-
-    // ⏱️ Stop & clear timer if it exists
-    if (activeTaskTimers.has(key)) {
-      const timer = activeTaskTimers.get(key);
-      clearInterval(timer.intervalId);
-      activeTaskTimers.delete(key);
-
-      // 🔔 Notify all sockets tied to this task
-      if (timer.sockets) {
-        timer.sockets.forEach((s) => {
           try {
-            s.send(
+            // 1️⃣ Update Firestore FIRST
+            await taskRef.update({
+              status: "active",
+              assignedAt: serverTimestamp(),
+              durationSec: duration,
+            });
+
+            console.log("Task started for:", data.userId);
+
+            // 2️⃣ READ BACK server timestamp (CRITICAL)
+            const snap = await taskRef.get();
+
+            if (!snap.exists) {
+              throw new Error("Task document not found after update");
+            }
+
+            const startedAt = snap.data().assignedAt.toMillis();
+
+            // 3️⃣ START SERVER TIMER ⏱️
+            startTaskTimer({
+              ws,
+              userId: data.userId,
+              taskId: data.taskId,
+              duration,
+              startedAt,
+            });
+
+            // 4️⃣ Respond to client
+            ws.send(
               JSON.stringify({
-                type: "taskCanceled",
-                taskId: data.taskId,
-                reason: "User canceled task",
+                type: "startTaskResponse",
+                msg: "You are ready to begin",
               }),
             );
+          } catch (error) {
+            console.error("Task launch failed:", error);
+
+            ws.send(
+              JSON.stringify({
+                type: "startTaskError",
+                msg: "Sorry, an error occurred when starting the task",
+              }),
+            );
+          }
+
+          break;
+        case "submitTask":
+          if (!data.uid || !data.taskId || !data.taskType) break;
+
+          if (data.taskType == "Content Review") {
+            const key = `${data.uid}_${data.taskId}`;
+            let timer;
+            let payOut = 0;
+
+            try {
+              if (activeTaskTimers.has(key)) {
+                timer = activeTaskTimers.get(key);
+                clearInterval(timer.intervalId);
+              }
+
+              const language = "en-US";
+
+              const checkText = async (text) => {
+                try {
+                  const formData = new URLSearchParams();
+                  formData.append("text", text);
+                  formData.append("language", language);
+
+                  const res = await fetch(
+                    "https://api.languagetool.org/v2/check",
+                    {
+                      method: "POST",
+                      body: formData,
+                    },
+                  );
+
+                  // ✅ Check if response is OK
+                  if (!res.ok) {
+                    console.error(
+                      `LanguageTool API error: ${res.status} ${res.statusText}`,
+                    );
+                    return 0; // Return 0 errors as fallback
+                  }
+
+                  // ✅ Check content type before parsing JSON
+                  const contentType = res.headers.get("content-type");
+                  if (
+                    !contentType ||
+                    !contentType.includes("application/json")
+                  ) {
+                    const errorText = await res.text();
+                    console.error(
+                      "LanguageTool returned non-JSON:",
+                      errorText.substring(0, 200),
+                    );
+                    return 0; // Return 0 errors as fallback
+                  }
+
+                  const result = await res.json();
+                  return (result.matches || []).length;
+                } catch (error) {
+                  console.error("checkText error:", error.message);
+                  return 0; // Graceful fallback
+                }
+              };
+              const originalErrors = await checkText(data.originalText);
+              const refinedErrors = await checkText(data.refinedText);
+
+              let aiScore =
+                100 - refinedErrors * 10 + (originalErrors - refinedErrors) * 5;
+              aiScore = Math.max(0, Math.min(100, aiScore));
+
+              const userRef = firestore.collection("Users").doc(data.uid);
+              const taskRef = userRef
+                .collection("assignedTasks")
+                .doc(data.taskId);
+
+              let cash = 0;
+              let rewarded = false;
+              let status = "Failed";
+
+              await firestore.runTransaction(async (tx) => {
+                const [taskSnap, userSnap] = await Promise.all([
+                  tx.get(taskRef),
+                  tx.get(userRef),
+                ]);
+
+                if (!taskSnap.exists || !userSnap.exists) return;
+                if (taskSnap.data().status === "Completed") return;
+
+                const currentBalance = userSnap.data().accountBalance || 0;
+                const currentPoints = userSnap.data().accountPoints || 0;
+
+                let pointsEarned = 0;
+                if (aiScore >= 80) {
+                  const payPercent = aiScore / 100;
+                  const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
+                  payOut = Math.round(fullPay * payPercent * 100) / 100; // ✅ Rounds to 2 decimals
+
+                  rewarded = true;
+                  status = "Completed";
+
+                  // 🎯 POINTS LOGIC
+                  pointsEarned = Math.floor(aiScore / 10); // e.g. 85 → 8 points
+
+                  tx.update(taskRef, {
+                    aiScore,
+                    reviewedAt: Date.now(),
+                    status,
+                    rewarded: true,
+                    pointsEarned,
+                    fullPay, // Store original amount
+                    payOut, // Store what they actually got
+                    payPercent, // Store percentage
+                  });
+
+                  tx.update(userRef, {
+                    accountBalance:
+                      Math.round((currentBalance + payOut) * 100) / 100,
+                    accountPoints: currentPoints + pointsEarned,
+                  });
+                } else {
+                  tx.update(taskRef, {
+                    aiScore,
+                    reviewedAt: Date.now(),
+                    status,
+                    rewarded: false,
+                  });
+                }
+              });
+
+              const monthNames = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+              ];
+              const currentMonth = monthNames[new Date().getMonth()];
+              const currentYear = new Date().getFullYear();
+              const statsRef = firestore
+                .collection("Users")
+                .doc(data.uid)
+                .collection("taskStats")
+                .doc(`${currentYear}_${currentMonth}`);
+
+              await firestore.runTransaction(async (tx) => {
+                const statsSnap = await tx.get(statsRef);
+
+                if (statsSnap.exists) {
+                  tx.update(statsRef, {
+                    tasksCompleted: admin.firestore.FieldValue.increment(1),
+                    totalEarnings: admin.firestore.FieldValue.increment(payOut),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                  });
+                } else {
+                  tx.set(statsRef, {
+                    month: currentMonth,
+                    year: currentYear,
+                    tasksRequested: 0,
+                    tasksCompleted: 1,
+                    totalEarnings: payOut,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                  });
+                }
+              });
+
+              const cooldownInfo = await checkAndSetCooldown(data.uid);
+
+              if (timer?.sockets?.size) {
+                timer.sockets.forEach((s) => {
+                  if (s.readyState === WebSocket.OPEN) {
+                    s.send(
+                      JSON.stringify({
+                        type: "taskComplete",
+                        taskId: data.taskId,
+                        aiScore,
+                        payOut, // ✅ USE payOut (not cash)
+                        rewarded,
+                        status,
+                        completeMethod: "Instant",
+                        cooldown: cooldownInfo, // ✅ SEND cooldown info
+                      }),
+                    );
+                  }
+                });
+              }
+
+              activeTaskTimers.delete(key);
+            } catch (error) {
+              console.error("Error processing task:", error.message);
+
+              if (timer?.sockets?.size) {
+                timer.sockets.forEach((s) => {
+                  if (s.readyState === WebSocket.OPEN) {
+                    s.send(
+                      JSON.stringify({
+                        type: "taskError",
+                        taskId: data.taskId,
+                        error: error.message || "Task processing failed",
+                      }),
+                    );
+                  }
+                });
+              }
+            }
+          }
+
+          if (data.taskType === "Content Translation") {
+            const key = `${data.uid}_${data.taskId}`;
+            let timer;
+            let payOut = 0;
+
+            try {
+              if (!modelInstance) {
+                console.log("Model not ready yet");
+
+                if (timer?.sockets?.size) {
+                  timer.sockets.forEach((s) => {
+                    if (s.readyState === WebSocket.OPEN) {
+                      s.send(
+                        JSON.stringify({
+                          type: "taskError",
+                          taskId: data.taskId,
+                          error:
+                            "System warming up, try again in a few seconds",
+                        }),
+                      );
+                    }
+                  });
+                }
+
+                return;
+              }
+
+              if (activeTaskTimers.has(key)) {
+                timer = activeTaskTimers.get(key);
+                clearInterval(timer.intervalId);
+              }
+              const reference = data.textotranslate;
+              const userText = data.translatedText;
+              if (!reference || !userText) throw new Error("Invalid input");
+
+              let aiScore = await weRTest(reference, userText, modelInstance);
+              const userRef = firestore.collection("Users").doc(data.uid);
+              const taskRef = userRef
+                .collection("assignedTasks")
+                .doc(data.taskId);
+
+              let cash = 0;
+              let rewarded = false;
+              let status = "Failed";
+
+              await firestore.runTransaction(async (tx) => {
+                const [taskSnap, userSnap] = await Promise.all([
+                  tx.get(taskRef),
+                  tx.get(userRef),
+                ]);
+
+                if (!taskSnap.exists || !userSnap.exists) return;
+                if (taskSnap.data().status === "Completed") return;
+                const currentBalance = userSnap.data().accountBalance || 0;
+                const currentPoints = userSnap.data().accountPoints || 0;
+
+                let pointsEarned = 0;
+
+                if (aiScore >= 70) {
+                  const payPercent = aiScore / 100;
+                  const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
+                  payOut = Math.round(fullPay * payPercent * 100) / 100; // ✅ Rounds to 2 decimals
+                  rewarded = true;
+                  status = "Completed";
+                  // 🎯 POINTS LOGIC
+                  pointsEarned = Math.floor(aiScore / 10);
+
+                  tx.update(taskRef, {
+                    aiScore,
+                    reviewedAt: Date.now(),
+                    status,
+                    rewarded: true,
+                    pointsEarned,
+                    fullPay,
+                    payOut,
+                    payPercent,
+                  });
+
+                  tx.update(userRef, {
+                    accountBalance:
+                      Math.round((currentBalance + payOut) * 100) / 100,
+                    accountPoints: currentPoints + pointsEarned,
+                  });
+                } else {
+                  tx.update(taskRef, {
+                    aiScore,
+                    reviewedAt: Date.now(),
+                    status,
+                    rewarded: false,
+                  });
+                }
+              });
+
+              const monthNames = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+              ];
+              const currentMonth = monthNames[new Date().getMonth()];
+              const currentYear = new Date().getFullYear();
+              const statsRef = firestore
+                .collection("Users")
+                .doc(data.uid)
+                .collection("taskStats")
+                .doc(`${currentYear}_${currentMonth}`);
+
+              await firestore.runTransaction(async (tx) => {
+                const statsSnap = await tx.get(statsRef);
+
+                if (statsSnap.exists) {
+                  tx.update(statsRef, {
+                    tasksCompleted: admin.firestore.FieldValue.increment(1),
+                    totalEarnings: admin.firestore.FieldValue.increment(payOut),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                  });
+                } else {
+                  tx.set(statsRef, {
+                    month: currentMonth,
+                    year: currentYear,
+                    tasksRequested: 0,
+                    tasksCompleted: 1,
+                    totalEarnings: payOut,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                  });
+                }
+              });
+
+              const cooldownInfo = await checkAndSetCooldown(data.uid);
+
+              if (timer?.sockets?.size) {
+                timer.sockets.forEach((s) => {
+                  s.send(
+                    JSON.stringify({
+                      type: "taskComplete",
+                      taskId: data.taskId,
+                      aiScore,
+                      payOut, // ✅ USE payOut
+                      rewarded,
+                      status,
+                      completeMethod: "Instant",
+                      cooldown: cooldownInfo,
+                    }),
+                  );
+                });
+              }
+              activeTaskTimers.delete(key);
+            } catch (error) {
+              console.error(
+                "Error processing translation task:",
+                error.message,
+              );
+
+              if (timer?.sockets?.size) {
+                timer.sockets.forEach((s) => {
+                  if (s.readyState === WebSocket.OPEN) {
+                    s.send(
+                      JSON.stringify({
+                        type: "taskError",
+                        taskId: data.taskId,
+                        error: error.message || "Task processing failed",
+                      }),
+                    );
+                  }
+                });
+              }
+            }
+          }
+
+          if (data.taskType === "Fact Check") {
+            const key = `${data.uid}_${data.taskId}`;
+            let timer;
+            let payOut = 0;
+
+            try {
+              if (activeTaskTimers.has(key)) {
+                timer = activeTaskTimers.get(key);
+                clearInterval(timer.intervalId);
+              }
+
+              const correctVerdict = data.originalverdict;
+              const userVerdict = data.userVerdict;
+
+              const correctExplanation = data.originalExplanation;
+              const userExplanation = data.userExplanation;
+
+              let verdictScore = 0;
+
+              if (
+                correctVerdict.toLowerCase().trim() ===
+                userVerdict.toLowerCase().trim()
+              ) {
+                verdictScore = 50;
+              }
+
+              const emb1 = await modelInstance(correctExplanation);
+              const emb2 = await modelInstance(userExplanation);
+
+              const vec1 = meanPooling(emb1);
+              const vec2 = meanPooling(emb2);
+
+              const similarity = cosineSimilarity(vec1, vec2);
+              const explanationScore = similarity * 40;
+
+              const grammarErr = await grammarErrors(userExplanation);
+              const grammarScore = Math.max(0, 10 - grammarErr * 2);
+
+              let aiScore = verdictScore + explanationScore + grammarScore;
+              aiScore = Math.round(Math.max(0, Math.min(100, aiScore)));
+
+              const userRef = firestore.collection("Users").doc(data.uid);
+              const taskRef = userRef
+                .collection("assignedTasks")
+                .doc(data.taskId);
+
+              let cash = 0;
+              let rewarded = false;
+              let status = "Failed";
+
+              await firestore.runTransaction(async (tx) => {
+                const [taskSnap, userSnap] = await Promise.all([
+                  tx.get(taskRef),
+                  tx.get(userRef),
+                ]);
+
+                if (!taskSnap.exists || !userSnap.exists) return;
+                if (taskSnap.data().status === "Completed") return;
+
+                const currentBalance = userSnap.data().accountBalance || 0;
+                const currentPoints = userSnap.data().accountPoints || 0;
+
+                let pointsEarned = 0;
+
+                if (aiScore >= 70) {
+                  const payPercent = aiScore / 100;
+                  const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
+                  payOut = Math.round(fullPay * payPercent * 100) / 100; // ✅ Rounds to 2 decimals
+                  rewarded = true;
+                  status = "Completed";
+
+                  // 🎯 POINTS LOGIC
+                  pointsEarned = Math.floor(aiScore / 10);
+
+                  tx.update(taskRef, {
+                    aiScore,
+                    reviewedAt: Date.now(),
+                    status,
+                    rewarded: true,
+                    pointsEarned,
+                    fullPay,
+                    payOut,
+                    payPercent,
+                  });
+
+                  tx.update(userRef, {
+                    accountBalance:
+                      Math.round((currentBalance + payOut) * 100) / 100,
+                    accountPoints: currentPoints + pointsEarned,
+                  });
+                } else {
+                  tx.update(taskRef, {
+                    aiScore,
+                    reviewedAt: Date.now(),
+                    status,
+                    rewarded: false,
+                  });
+                }
+              });
+
+              const monthNames = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+              ];
+              const currentMonth = monthNames[new Date().getMonth()];
+              const currentYear = new Date().getFullYear();
+              const statsRef = firestore
+                .collection("Users")
+                .doc(data.uid)
+                .collection("taskStats")
+                .doc(`${currentYear}_${currentMonth}`);
+
+              await firestore.runTransaction(async (tx) => {
+                const statsSnap = await tx.get(statsRef);
+
+                if (statsSnap.exists) {
+                  tx.update(statsRef, {
+                    tasksCompleted: admin.firestore.FieldValue.increment(1),
+                    totalEarnings: admin.firestore.FieldValue.increment(payOut),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                  });
+                } else {
+                  tx.set(statsRef, {
+                    month: currentMonth,
+                    year: currentYear,
+                    tasksRequested: 0,
+                    tasksCompleted: 1,
+                    totalEarnings: payOut,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                  });
+                }
+              });
+
+              const cooldownInfo = await checkAndSetCooldown(data.uid);
+
+              if (timer?.sockets?.size) {
+                timer.sockets.forEach((s) => {
+                  s.send(
+                    JSON.stringify({
+                      type: "taskComplete",
+                      taskId: data.taskId,
+                      aiScore,
+                      payOut, // ✅ USE payOut
+                      rewarded,
+                      status,
+                      completeMethod: "Instant",
+                      cooldown: cooldownInfo,
+                    }),
+                  );
+                });
+              }
+
+              activeTaskTimers.delete(key);
+            } catch (error) {
+              console.error("Error processing fact check task:", error.message);
+
+              if (timer?.sockets?.size) {
+                timer.sockets.forEach((s) => {
+                  if (s.readyState === WebSocket.OPEN) {
+                    s.send(
+                      JSON.stringify({
+                        type: "taskError",
+                        taskId: data.taskId,
+                        error: error.message || "Task processing failed",
+                      }),
+                    );
+                  }
+                });
+              }
+            }
+          }
+
+          break;
+
+        case "cancelTask":
+          if (!data.uid || !data.taskId) break;
+
+          try {
+            const key = `${data.uid}_${data.taskId}`;
+
+            // ⏱️ Stop & clear timer if it exists
+            if (activeTaskTimers.has(key)) {
+              const timer = activeTaskTimers.get(key);
+              clearInterval(timer.intervalId);
+              activeTaskTimers.delete(key);
+
+              // 🔔 Notify all sockets tied to this task
+              if (timer.sockets) {
+                timer.sockets.forEach((s) => {
+                  try {
+                    s.send(
+                      JSON.stringify({
+                        type: "taskCanceled",
+                        taskId: data.taskId,
+                        reason: "User canceled task",
+                      }),
+                    );
+                  } catch (err) {
+                    console.error("Socket notify failed:", err);
+                  }
+                });
+              }
+            }
+
+            // 🔥 Update Firestore
+            const taskRef = firestore
+              .collection("Users")
+              .doc(data.uid)
+              .collection("assignedTasks")
+              .doc(data.taskId);
+
+            await taskRef.update({
+              status: "Canceled",
+              canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+              rewarded: false,
+            });
+
+            console.log(`Task ${data.taskId} canceled by user ${data.uid}`);
           } catch (err) {
-            console.error("Socket notify failed:", err);
+            console.error("Cancel task failed:", err);
+
+            ws.send(
+              JSON.stringify({
+                type: "cancelTaskError",
+                msg: "Failed to cancel task. Try again.",
+              }),
+            );
           }
-        });
-      }
-    }
 
-    // 🔥 Update Firestore
-    const taskRef = firestore
-      .collection("Users")
-      .doc(data.uid)
-      .collection("assignedTasks")
-      .doc(data.taskId);
+          break;
 
-    await taskRef.update({
-      status: "Canceled",
-      canceledAt: admin.firestore.FieldValue.serverTimestamp(),
-      rewarded: false,
-    });
+        case "startScreeningTimer":
+          if (!data.userId) break;
 
-    console.log(`Task ${data.taskId} canceled by user ${data.uid}`);
-  } catch (err) {
-    console.error("Cancel task failed:", err);
+          const durationScreen = 900; // 15 minutes
+          const key = `screening_${data.userId}`;
 
-    ws.send(
-      JSON.stringify({
-        type: "cancelTaskError",
-        msg: "Failed to cancel task. Try again.",
-      }),
-    );
-  }
+          try {
+            // Check if timer already exists
+            if (activeScreeningTimers.has(key)) {
+              const existing = activeScreeningTimers.get(key);
+              existing.sockets.add(ws);
+              const now = Date.now();
+              const elapsed = Math.floor((now - existing.startedAt) / 1000);
+              const remaining = Math.max(durationScreen - elapsed, 0);
 
-  break;
+              ws.send(
+                JSON.stringify({
+                  type: "screeningTimerUpdate",
+                  remainingTime: remaining,
+                }),
+              );
+              break;
+            }
 
-case "startScreeningTimer":
-  if (!data.userId) break;
+            // Start new timer
+            const startedAt = Date.now();
+            const sockets = new Set([ws]);
 
-  const durationScreen = 900; // 15 minutes
-  const key = `screening_${data.userId}`;
+            const intervalId = setInterval(() => {
+              const now = Date.now();
+              const elapsed = Math.floor((now - startedAt) / 1000);
+              const remaining = durationScreen - elapsed;
 
-  try {
-    // Check if timer already exists
-    if (activeScreeningTimers.has(key)) {
-      const existing = activeScreeningTimers.get(key);
-      existing.sockets.add(ws);
-      const now = Date.now();
-      const elapsed = Math.floor((now - existing.startedAt) / 1000);
-      const remaining = Math.max(durationScreen - elapsed, 0);
-    
-      ws.send(JSON.stringify({
-        type: "screeningTimerUpdate",
-        remainingTime: remaining,
-      }));
-      break;
-    }
+              sockets.forEach((s) => {
+                if (s.readyState === WebSocket.OPEN) {
+                  s.send(
+                    JSON.stringify({
+                      type: "screeningTimerUpdate",
+                      remainingTime: remaining,
+                    }),
+                  );
+                }
+              });
 
-    // Start new timer
-    const startedAt = Date.now();
-    const sockets = new Set([ws]);
-    
-    const intervalId = setInterval(() => {
-      const now = Date.now();
-      const elapsed = Math.floor((now - startedAt) / 1000);
-      const remaining = durationScreen - elapsed;
-      
-      sockets.forEach((s) => {
-        if (s.readyState === WebSocket.OPEN) {
-          s.send(JSON.stringify({
-            type: "screeningTimerUpdate",
-            remainingTime: remaining,
-          }));
-        }
-      });
-      
-      if (remaining <= 0) {
-        clearInterval(intervalId);
-        activeScreeningTimers.delete(key);
-        
-        sockets.forEach((s) => {
-          if (s.readyState === WebSocket.OPEN) {
-            s.send(JSON.stringify({ type: "screeningTimeExpired" }));
+              if (remaining <= 0) {
+                clearInterval(intervalId);
+                activeScreeningTimers.delete(key);
+
+                sockets.forEach((s) => {
+                  if (s.readyState === WebSocket.OPEN) {
+                    s.send(JSON.stringify({ type: "screeningTimeExpired" }));
+                  }
+                });
+              }
+            }, 1000);
+
+            activeScreeningTimers.set(key, { intervalId, sockets, startedAt });
+
+            ws.send(
+              JSON.stringify({
+                type: "screeningTimerStarted",
+                remainingTime: durationScreen,
+              }),
+            );
+          } catch (error) {
+            console.error("Screening timer error:", error);
           }
-        });
+          break;
+
+        case "screeningComplete":
+          if (!data.userId) break;
+
+          try {
+            const userRef = firestore.collection("Users").doc(data.userId);
+
+            await userRef.update({
+              screeningCompleted: true,
+              screeningScore: data.score,
+              screeningTotal: data.totalQuestions,
+              screeningPercentage: data.percentage,
+              screeningPassed: data.passed,
+              screeningCompletedAt:
+                admin.firestore.FieldValue.serverTimestamp(),
+              screenCount: admin.firestore.FieldValue.increment(1),
+              screeningExpired: data.timeExpired || false,
+            });
+
+            // Clean up timer if exists
+            const key = `screening_${data.userId}`;
+            if (activeScreeningTimers.has(key)) {
+              const timer = activeScreeningTimers.get(key);
+              clearInterval(timer.intervalId);
+              activeScreeningTimers.delete(key);
+            }
+
+            ws.send(
+              JSON.stringify({
+                type: "screeningCompleteConfirm",
+                success: true,
+              }),
+            );
+
+            console.log(
+              `Screening complete for ${data.userId}: ${data.score}/${data.totalQuestions} (${data.passed ? "PASS" : "FAIL"})`,
+            );
+          } catch (error) {
+            console.error("Error saving screening results:", error);
+            ws.send(
+              JSON.stringify({
+                type: "screeningCompleteError",
+                error: error.message,
+              }),
+            );
+          }
+          break;
       }
-    }, 1000);
-    
-    activeScreeningTimers.set(key, { intervalId, sockets, startedAt });
-    
-    ws.send(JSON.stringify({
-      type: "screeningTimerStarted",
-      remainingTime: durationScreen,
-    }));
-    
-  } catch (error) {
-    console.error("Screening timer error:", error);
-  }
-  break;
-
-  case "screeningComplete":
-  if (!data.userId) break;
-
-  try {
-    const userRef = firestore.collection("Users").doc(data.userId);
-    
-    await userRef.update({
-      screeningCompleted: true,
-      screeningScore: data.score,
-      screeningTotal: data.totalQuestions,
-      screeningPercentage: data.percentage,
-      screeningPassed: data.passed,
-      screeningCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
-      screenCount: admin.firestore.FieldValue.increment(1),
-      screeningExpired: data.timeExpired || false,
-    });
-    
-    // Clean up timer if exists
-    const key = `screening_${data.userId}`;
-    if (activeScreeningTimers.has(key)) {
-      const timer = activeScreeningTimers.get(key);
-      clearInterval(timer.intervalId);
-      activeScreeningTimers.delete(key);
-    }
-    
-    ws.send(JSON.stringify({
-      type: "screeningCompleteConfirm",
-      success: true,
-    }));
-    
-    console.log(`Screening complete for ${data.userId}: ${data.score}/${data.totalQuestions} (${data.passed ? "PASS" : "FAIL"})`);
-    
-  } catch (error) {
-    console.error("Error saving screening results:", error);
-    ws.send(JSON.stringify({
-      type: "screeningCompleteError",
-      error: error.message,
-    }));
-  }
-  break;
-
-}
-    
-
-   
     } catch (err) {
       console.error("Invalid message", err);
     }
@@ -1432,33 +1537,31 @@ adminUIDS.forEach((uid) => {
 app.post("/uploadAITask", upload.none(), async (req, res) => {
   const { taskType, content, uid, jobpay } = req.body;
   // if (adminUIDS.includes(uid)) {
-    if (!uid) {
-
+  if (!uid) {
     return res.status(403).json({
       status: 403,
       msg: "You do not have access",
     });
   }
 
-    const docRef = await firestore.collection("Ai-tasks").doc();
-    docRef
-      .set({
-        taskId: docRef.id,
-        assignCount: 0,
-        type: taskType,
-        instructions:
-          "Fix grammar, spelling, and clarity. Do not change the meaning.",
-        originaltext: content,
-        pay: Number(jobpay),
-        status: "active",
-      })
-      .then(() => {
-        res.json({ msg: "AI task uploaded", status: 200 });
-      })
-      .catch(() => {
-        res.json({ msg: "Error uploading task", status: 300 });
-      });
-  
+  const docRef = await firestore.collection("Ai-tasks").doc();
+  docRef
+    .set({
+      taskId: docRef.id,
+      assignCount: 0,
+      type: taskType,
+      instructions:
+        "Fix grammar, spelling, and clarity. Do not change the meaning.",
+      originaltext: content,
+      pay: Number(jobpay),
+      status: "active",
+    })
+    .then(() => {
+      res.json({ msg: "AI task uploaded", status: 200 });
+    })
+    .catch(() => {
+      res.json({ msg: "Error uploading task", status: 300 });
+    });
 });
 
 app.post("/Aloo", (req, res) => {
@@ -1471,8 +1574,7 @@ app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
 
   // Only allow admins
   // if (!adminUIDS.includes(uid)) {
-    if (!uid) {
-
+  if (!uid) {
     return res.status(403).json({
       status: 403,
       msg: "You do not have access",
@@ -1534,8 +1636,7 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
 
   // Only allow admins
   // if (!adminUIDS.includes(uid)) {
-    if (!uid) {
-
+  if (!uid) {
     return res.status(403).json({
       status: 403,
       msg: "You do not have access",
@@ -1572,29 +1673,24 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
   }
 });
 
-
-
-
-
 app.post("/uploadJob", upload.none(), async (req, res) => {
-  const { jobCat, jobName, jobReq,jobDesc,jobPay,uid } = req.body;
+  const { jobCat, jobName, jobReq, jobDesc, jobPay, uid } = req.body;
   // if (adminUIDS.includes(uid)) {
-    if (!uid) {
-
+  if (!uid) {
     return res.status(403).json({
       status: 403,
       msg: "You do not have access",
     });
   }
 
-   try {
+  try {
     const docRef = firestore.collection("Jobs").doc();
 
     await docRef.set({
       jobID: docRef.id,
       jobCat,
       jobName,
-      jobminiTtile:jobCat,
+      jobminiTtile: jobCat,
       jobReq,
       jobDesc,
       jobNameLowerCase: jobName.toLowerCase(),
@@ -1606,7 +1702,6 @@ app.post("/uploadJob", upload.none(), async (req, res) => {
   } catch (err) {
     res.json({ msg: "Error uploading Job", status: 300 });
   }
-    
 });
 
 app.post("/withdrawRequest", upload.none(), async (req, res) => {
@@ -1626,7 +1721,7 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
     const uid = decodedToken.uid;
 
     // 📦 2. Get data (IGNORE uid & name from frontend)
-    const { amount,withdrawMethod,bankDetails,cryptoDetails } = req.body;
+    const { amount, withdrawMethod, bankDetails, cryptoDetails } = req.body;
 
     if (!amount) {
       return res.status(400).json({
@@ -1704,26 +1799,27 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
       name: userData.name, // ✅ always from DB
       amount: withdrawAmount,
       status: "pending",
+
       withdrawMethod,
       bankDetails,
       cryptoDetails,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     const transactionRef = firestore
-  .collection("Users")
-  .doc(uid)
-  .collection("transactions")
-  .doc();
+      .collection("Users")
+      .doc(uid)
+      .collection("transactions")
+      .doc();
 
-await transactionRef.set({
-  amount: withdrawAmount,
-  bankDetails,
-  cryptoDetails,
-  withdrawMethod,
-  type: "withdrawal",
-  status: "pending",
-  createdAt: admin.firestore.FieldValue.serverTimestamp(),
-});
+    await transactionRef.set({
+      amount: withdrawAmount,
+      bankDetails,
+      cryptoDetails,
+      withdrawMethod,
+      type: "withdrawal",
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
     // 🕒 9. Update cooldown timestamp
     await userRef.update({
@@ -1735,7 +1831,6 @@ await transactionRef.set({
       status: 200,
       msg: "Withdrawal request submitted",
     });
-
   } catch (error) {
     console.error("Withdraw error:", error);
 
@@ -1746,24 +1841,22 @@ await transactionRef.set({
   }
 });
 
-
-
 // buy tokens - Add upload.none() middleware
-app.post('/payNow', upload.none(), async (req, res) => {
+app.post("/payNow", upload.none(), async (req, res) => {
   const { uid, payEmail, name, amount } = req.body;
 
   // ✅ Validate required fields
   if (!uid || !payEmail || !name || !amount) {
-    return res.status(400).json({ 
-      error: 'Missing required fields: uid, payEmail, name, amount' 
+    return res.status(400).json({
+      error: "Missing required fields: uid, payEmail, name, amount",
     });
   }
 
   // ✅ Validate amount
   const numAmount = parseFloat(amount);
   if (isNaN(numAmount) || numAmount < 5 || numAmount > 500) {
-    return res.status(400).json({ 
-      error: 'Amount must be between $5 and $500 USD' 
+    return res.status(400).json({
+      error: "Amount must be between $5 and $500 USD",
     });
   }
 
@@ -1794,49 +1887,53 @@ app.post('/payNow', upload.none(), async (req, res) => {
       purchaseId: purchaseRef.id,
       tokens: tokensToAdd,
       amount: numAmount,
-    }
+    },
   });
 
   const options = {
-    hostname: 'api.paystack.co',
+    hostname: "api.paystack.co",
     port: 443,
-    path: '/transaction/initialize',
-    method: 'POST',
+    path: "/transaction/initialize",
+    method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-      'Content-Type': 'application/json'
-    }
+      "Content-Type": "application/json",
+    },
   };
 
-  const payStackreq = https.request(options, (payStackres) => {
-    let data = '';
+  const payStackreq = https
+    .request(options, (payStackres) => {
+      let data = "";
 
-    payStackres.on('data', (chunk) => {
-      data += chunk;
-    });
+      payStackres.on("data", (chunk) => {
+        data += chunk;
+      });
 
-    payStackres.on('end', () => {
-      try {
-        const payStackRespData = JSON.parse(data);
-        console.log(payStackRespData);
-        
-        if (payStackRespData.status && payStackRespData.data?.reference) {
-          purchaseRef.update({
-            reference: payStackRespData.data.reference,
-            paystackData: payStackRespData.data
-          });
+      payStackres.on("end", () => {
+        try {
+          const payStackRespData = JSON.parse(data);
+          console.log(payStackRespData);
+
+          if (payStackRespData.status && payStackRespData.data?.reference) {
+            purchaseRef.update({
+              reference: payStackRespData.data.reference,
+              paystackData: payStackRespData.data,
+            });
+          }
+
+          res.json(payStackRespData);
+        } catch (error) {
+          console.error("Parse error:", error);
+          res
+            .status(500)
+            .json({ error: "Invalid response from payment provider" });
         }
-        
-        res.json(payStackRespData);
-      } catch (error) {
-        console.error("Parse error:", error);
-        res.status(500).json({ error: 'Invalid response from payment provider' });
-      }
+      });
+    })
+    .on("error", (error) => {
+      console.error("Request error:", error);
+      res.status(500).json({ error: "Payment initialization failed" });
     });
-  }).on('error', (error) => {
-    console.error("Request error:", error);
-    res.status(500).json({ error: 'Payment initialization failed' });
-  });
 
   payStackreq.write(params);
   payStackreq.end();
@@ -1844,91 +1941,90 @@ app.post('/payNow', upload.none(), async (req, res) => {
 // Verify webhook signature (function definition only - NO CALL)
 const verifyPaystackSignature = (req) => {
   const secret = process.env.PAYSTACK_SECRET_KEY;
-  const signature = req.headers['x-paystack-signature'];
-  
-  console.log('Signature received:', signature);
-  console.log('Secret key (first 10 chars):', secret?.substring(0, 10));
-  
+  const signature = req.headers["x-paystack-signature"];
+
+  console.log("Signature received:", signature);
+  console.log("Secret key (first 10 chars):", secret?.substring(0, 10));
+
   if (!signature) {
-    console.log('❌ No signature header');
+    console.log("❌ No signature header");
     return false;
   }
-  
+
   const rawBody = req.body.toString();
   const hash = crypto
-    .createHmac('sha512', secret)
+    .createHmac("sha512", secret)
     .update(rawBody)
-    .digest('hex');
-  
+    .digest("hex");
 
-  
   return hash === signature;
 };
 
 // ✅ Webhook route - THIS is where the function should be called
-app.post('/paystack-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  // Verify signature - passing req object here
-  if (!verifyPaystackSignature(req)) {
-    console.log('Invalid webhook signature');
-    return res.status(401).send('Unauthorized');
-  }
-  
-  const event = req.body;
-  console.log('Webhook received:', event.event);
-  
-  // Handle successful payment
-  if (event.event === 'charge.success') {
-    const { reference, metadata } = event.data;
-    
-    try {
-      const purchaseQuery = await firestore
-        .collection("TokenPurchases")
-        .where("reference", "==", reference)
-        .limit(1)
-        .get();
-      
-      if (purchaseQuery.empty) {
-        console.log('Purchase not found for reference:', reference);
-        return res.sendStatus(200);
-      }
-      
-      const purchaseDoc = purchaseQuery.docs[0];
-      const purchase = purchaseDoc.data();
-      
-      if (purchase.status === 'completed') {
-        console.log('Purchase already processed:', reference);
-        return res.sendStatus(200);
-      }
-      
-      await purchaseDoc.ref.update({
-        status: 'completed',
-        paidAt: admin.firestore.FieldValue.serverTimestamp(),
-        paystackData: event.data
-      });
-      
-      const userRef = firestore.collection("Users").doc(purchase.uid);
-      await userRef.update({
-        solaraTokens: admin.firestore.FieldValue.increment(purchase.tokens)
-      });
-      
-      
-    } catch (error) {
-      console.error('Webhook processing error:', error);
+app.post(
+  "/paystack-webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    // Verify signature - passing req object here
+    if (!verifyPaystackSignature(req)) {
+      console.log("Invalid webhook signature");
+      return res.status(401).send("Unauthorized");
     }
-  }
-  
-  res.sendStatus(200);
-});
+
+    const event = req.body;
+    console.log("Webhook received:", event.event);
+
+    // Handle successful payment
+    if (event.event === "charge.success") {
+      const { reference, metadata } = event.data;
+
+      try {
+        const purchaseQuery = await firestore
+          .collection("TokenPurchases")
+          .where("reference", "==", reference)
+          .limit(1)
+          .get();
+
+        if (purchaseQuery.empty) {
+          console.log("Purchase not found for reference:", reference);
+          return res.sendStatus(200);
+        }
+
+        const purchaseDoc = purchaseQuery.docs[0];
+        const purchase = purchaseDoc.data();
+
+        if (purchase.status === "completed") {
+          console.log("Purchase already processed:", reference);
+          return res.sendStatus(200);
+        }
+
+        await purchaseDoc.ref.update({
+          status: "completed",
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          paystackData: event.data,
+        });
+
+        const userRef = firestore.collection("Users").doc(purchase.uid);
+        await userRef.update({
+          solaraTokens: admin.firestore.FieldValue.increment(purchase.tokens),
+        });
+      } catch (error) {
+        console.error("Webhook processing error:", error);
+      }
+    }
+
+    res.sendStatus(200);
+  },
+);
 
 // ✅ VERIFY PAYMENT - Accept FormData (with multer)
-app.post('/verify-payment', upload.none(), async (req, res) => {
+app.post("/verify-payment", upload.none(), async (req, res) => {
   const { reference } = req.body;
-  
-  
+
   if (!reference) {
-    return res.status(400).json({ error: 'Reference is required' });
+    return res.status(400).json({ error: "Reference is required" });
   }
-  
+
   try {
     // Check if already processed
     const purchaseQuery = await firestore
@@ -1936,36 +2032,38 @@ app.post('/verify-payment', upload.none(), async (req, res) => {
       .where("reference", "==", reference)
       .limit(1)
       .get();
-    
+
     if (!purchaseQuery.empty) {
       const purchase = purchaseQuery.docs[0].data();
-      
-      if (purchase.status === 'completed') {
+
+      if (purchase.status === "completed") {
         console.log("✅ Payment already verified:", reference);
-        return res.json({ 
-          status: 'success', 
-          message: 'Payment already verified',
-          tokens: purchase.tokens
+        return res.json({
+          status: "success",
+          message: "Payment already verified",
+          tokens: purchase.tokens,
         });
       }
     }
-    
+
     // Verify with Paystack API
     const options = {
-      hostname: 'api.paystack.co',
+      hostname: "api.paystack.co",
       port: 443,
       path: `/transaction/verify/${reference}`,
-      method: 'GET',
+      method: "GET",
       headers: {
         Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-      }
+      },
     };
-    
+
     const paystackRes = await new Promise((resolve, reject) => {
       const req = https.request(options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+        res.on("end", () => {
           try {
             resolve(JSON.parse(data));
           } catch (e) {
@@ -1973,250 +2071,264 @@ app.post('/verify-payment', upload.none(), async (req, res) => {
           }
         });
       });
-      req.on('error', reject);
+      req.on("error", reject);
       req.end();
     });
-    
-    console.log('Paystack response status:', paystackRes.status);
-    
-    if (paystackRes.status && paystackRes.data.status === 'success') {
+
+    console.log("Paystack response status:", paystackRes.status);
+
+    if (paystackRes.status && paystackRes.data.status === "success") {
       const { metadata, amount } = paystackRes.data;
-      
+
       // ✅ FIX: Ensure tokensToAdd is a valid number
       let tokensToAdd = metadata?.tokens || Math.round((amount / 100) * 6);
-      
+
       // Validate tokensToAdd
-      if (isNaN(tokensToAdd) || tokensToAdd === undefined || tokensToAdd === null) {
+      if (
+        isNaN(tokensToAdd) ||
+        tokensToAdd === undefined ||
+        tokensToAdd === null
+      ) {
         console.error("Invalid tokensToAdd:", tokensToAdd);
         tokensToAdd = 0;
       }
-      
+
       // Ensure it's a number and round it
       tokensToAdd = Number(tokensToAdd);
       tokensToAdd = Math.round(tokensToAdd);
-      
-      
+
       if (purchaseQuery.empty) {
         // Create purchase record
-        await firestore.collection("TokenPurchases").doc().set({
-          uid: metadata?.uid,
-          reference: reference,
-          amount: amount / 100,
-          tokens: tokensToAdd,
-          status: 'completed',
-          paidAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+        await firestore
+          .collection("TokenPurchases")
+          .doc()
+          .set({
+            uid: metadata?.uid,
+            reference: reference,
+            amount: amount / 100,
+            tokens: tokensToAdd,
+            status: "completed",
+            paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
       } else {
         await purchaseQuery.docs[0].ref.update({
-          status: 'completed',
-          paidAt: admin.firestore.FieldValue.serverTimestamp()
+          status: "completed",
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       }
-      
+
       // ✅ FIX: Only increment if tokensToAdd > 0
       if (tokensToAdd > 0 && metadata?.uid) {
         const userRef = firestore.collection("Users").doc(metadata?.uid);
         await userRef.update({
-          solaraTokens: admin.firestore.FieldValue.increment(tokensToAdd)
+          solaraTokens: admin.firestore.FieldValue.increment(tokensToAdd),
         });
       } else {
         console.log("⚠️ No tokens to add or missing UID");
       }
-      
-      return res.json({ 
-        status: 'success', 
-        tokens: tokensToAdd
+
+      return res.json({
+        status: "success",
+        tokens: tokensToAdd,
       });
     }
-    
-    res.json({ status: 'pending', message: 'Payment not yet verified' });
-    
+
+    res.json({ status: "pending", message: "Payment not yet verified" });
   } catch (error) {
-    console.error('Verification error:', error);
-    res.status(500).json({ error: 'Verification failed: ' + error.message });
+    console.error("Verification error:", error);
+    res.status(500).json({ error: "Verification failed: " + error.message });
   }
 });
 
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+app.post("/extractIDdata", async (req, res) => {
+  const { base64ID } = req.body;
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  if (!base64ID) {
+    return res.status(400).json({ error: "Missing image data" });
+  }
 
-app.post('/extractIDdata', async (req, res) => {
-    const { base64ID } = req.body;
-    
-    if (!base64ID) {
-        return res.status(400).json({ error: 'Missing image data' });
-    }
+  // ✅ Remove any data:image/... prefix if present
+  const cleanBase64 = base64ID.replace(/^data:image\/\w+;base64,/, "");
 
-    // ✅ Remove any data:image/... prefix if present
-    const cleanBase64 = base64ID.replace(/^data:image\/\w+;base64,/, '');
-    
-    const options = {
-        method: 'POST',
-        url: 'https://id-document-recognition2.p.rapidapi.com/api/iddoc_base64',
-        headers: {
-            'x-rapidapi-key': '5143db4c77msh2c63df3a0683cc7p194ebfjsn474a41def10e',
-            'x-rapidapi-host': 'id-document-recognition2.p.rapidapi.com',
-            'Content-Type': 'application/json'  // ✅ Critical fix
-        },
-        data: {
-            image: cleanBase64  // Try without the data URL prefix
-        }
-    };
-    
-    try {
-        const response = await axios.request(options);
-        res.json(response.data);
-    } catch (error) {
-        console.error("ID extraction error:", error.response?.data || error.message);
-        res.status(500).json({ 
-            error: error.message,
-            details: error.response?.data 
-        });
-    }
+  const options = {
+    method: "POST",
+    url: "https://id-document-recognition2.p.rapidapi.com/api/iddoc_base64",
+    headers: {
+      "x-rapidapi-key": "5143db4c77msh2c63df3a0683cc7p194ebfjsn474a41def10e",
+      "x-rapidapi-host": "id-document-recognition2.p.rapidapi.com",
+      "Content-Type": "application/json", // ✅ Critical fix
+    },
+    data: {
+      image: cleanBase64, // Try without the data URL prefix
+    },
+  };
+
+  try {
+    const response = await axios.request(options);
+    res.json(response.data);
+  } catch (error) {
+    console.error(
+      "ID extraction error:",
+      error.response?.data || error.message,
+    );
+    res.status(500).json({
+      error: error.message,
+      details: error.response?.data,
+    });
+  }
 });
-app.post('/compareFaces', async (req, res) => {
-    // Try both possible field names
-    const base64selfie = req.body.base64selfie ;
-    const base64ID = req.body.base64ID || req.body.idImage || req.body.documentImage;
-    
-    console.log("Compare faces - Request body keys:", Object.keys(req.body));
-    
-    if (!base64selfie || !base64ID) {
-        return res.status(400).json({ 
-            error: 'Missing images', 
-            selfieProvided: !!base64selfie,
-            idProvided: !!base64ID
-        });
-    }
+app.post("/compareFaces", async (req, res) => {
+  // Try both possible field names
+  const base64selfie = req.body.base64selfie;
+  const base64ID =
+    req.body.base64ID || req.body.idImage || req.body.documentImage;
 
-    const options = {
-        method: 'POST',
-        url: 'https://face-recognition26.p.rapidapi.com/api/face_compare_base64',
-        headers: {
-            'x-rapidapi-key': '5143db4c77msh2c63df3a0683cc7p194ebfjsn474a41def10e',
-            'x-rapidapi-host': 'face-recognition26.p.rapidapi.com',
-            'Content-Type': 'application/json'
-        },
-        data: {
-            image1: base64selfie,
-            image2: base64ID
-        }
-    };
-    
-    try {
-        const response = await axios.request(options);
-        console.log("Face comparison successful");
-        res.json(response.data);   
-    } catch (error) {
-        console.error("Face comparison error:", error.message);
-        res.status(500).json({ error: error.message });
-    }
+  console.log("Compare faces - Request body keys:", Object.keys(req.body));
+
+  if (!base64selfie || !base64ID) {
+    return res.status(400).json({
+      error: "Missing images",
+      selfieProvided: !!base64selfie,
+      idProvided: !!base64ID,
+    });
+  }
+
+  const options = {
+    method: "POST",
+    url: "https://face-recognition26.p.rapidapi.com/api/face_compare_base64",
+    headers: {
+      "x-rapidapi-key": "5143db4c77msh2c63df3a0683cc7p194ebfjsn474a41def10e",
+      "x-rapidapi-host": "face-recognition26.p.rapidapi.com",
+      "Content-Type": "application/json",
+    },
+    data: {
+      image1: base64selfie,
+      image2: base64ID,
+    },
+  };
+
+  try {
+    const response = await axios.request(options);
+    console.log("Face comparison successful");
+    res.json(response.data);
+  } catch (error) {
+    console.error("Face comparison error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Apply for job endpoint
-app.post('/apply-job', upload.single('cv'), async (req, res) => {
+app.post("/apply-job", upload.single("cv"), async (req, res) => {
   const { jobId, userId } = req.body;
   const cvFile = req.file;
-  
+
   // Validate required fields
   if (!jobId) {
-    return res.status(400).json({ 
-      status: "error", 
-      message: "Job ID is required" 
+    return res.status(400).json({
+      status: "error",
+      message: "Job ID is required",
     });
   }
-  
+
   if (!userId) {
-    return res.status(400).json({ 
-      status: "error", 
-      message: "User ID is required" 
+    return res.status(400).json({
+      status: "error",
+      message: "User ID is required",
     });
   }
-  
+
   if (!cvFile) {
-    return res.status(400).json({ 
-      status: "error", 
-      message: "CV file is required" 
+    return res.status(400).json({
+      status: "error",
+      message: "CV file is required",
     });
   }
-  
+
   // Validate file type
-  const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+  const validTypes = [
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ];
   if (!validTypes.includes(cvFile.mimetype)) {
-    return res.status(400).json({ 
-      status: "error", 
-      message: "Please upload a PDF or DOCX file" 
+    return res.status(400).json({
+      status: "error",
+      message: "Please upload a PDF or DOCX file",
     });
   }
-  
+
   // Validate file size (max 5MB)
   const maxSize = 5 * 1024 * 1024;
   if (cvFile.size > maxSize) {
-    return res.status(400).json({ 
-      status: "error", 
-      message: "File size must be less than 5MB" 
+    return res.status(400).json({
+      status: "error",
+      message: "File size must be less than 5MB",
     });
   }
-  
+
   try {
     // Get user details from Firestore
     const userRef = firestore.collection("Users").doc(userId);
     const userSnap = await userRef.get();
-    
+
     if (!userSnap.exists) {
-      return res.status(404).json({ 
-        status: "error", 
-        message: "User not found" 
+      return res.status(404).json({
+        status: "error",
+        message: "User not found",
       });
     }
-    
+
     const userData = userSnap.data();
     const userEmail = userData.em || userData.email;
     const userName = userData.name || "User";
     const currentTokens = userData.solaraTokens || 0;
-    
+
     // ✅ Check if user has enough tokens
     if (currentTokens < 10) {
-      return res.status(400).json({ 
-        status: "error", 
-        message: "Insufficient tokens. You need 10 Solara tokens to apply for this job." 
+      return res.status(400).json({
+        status: "error",
+        message:
+          "Insufficient tokens. You need 10 Solara tokens to apply for this job.",
       });
     }
-    
+
     // Get job details (optional - if you have a jobs collection)
     let jobTitle = "the position";
     try {
       const jobRef = firestore.collection("Jobs").doc(jobId);
       const jobSnap = await jobRef.get();
       if (jobSnap.exists) {
-        jobTitle = jobSnap.data().title || jobSnap.data().jobName || "the position";
+        jobTitle =
+          jobSnap.data().title || jobSnap.data().jobName || "the position";
       }
     } catch (err) {
       console.log("Could not fetch job details:", err.message);
     }
-    
+
     // ✅ Run transaction to deduct tokens and save application
     const applicationId = firestore.collection("JobApplications").doc().id;
-    const applicationRef = firestore.collection("JobApplications").doc(applicationId);
-    
+    const applicationRef = firestore
+      .collection("JobApplications")
+      .doc(applicationId);
+
     await firestore.runTransaction(async (transaction) => {
       // Get fresh user data within transaction
       const freshUserSnap = await transaction.get(userRef);
       const freshUserData = freshUserSnap.data();
       const freshTokens = freshUserData.solaraTokens || 0;
-      
+
       // Double-check token balance within transaction
       if (freshTokens < 10) {
         throw new Error("Insufficient tokens");
       }
-      
+
       // Deduct 10 tokens
       transaction.update(userRef, {
-        solaraTokens: freshTokens - 10
+        solaraTokens: freshTokens - 10,
       });
-      
+
       // Save application record
       transaction.set(applicationRef, {
         id: applicationId,
@@ -2230,10 +2342,10 @@ app.post('/apply-job', upload.single('cv'), async (req, res) => {
         tokensDeducted: 10,
         status: "pending",
         appliedAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
-    
+
     // Optional: Send email notification
     // await sendEmail({
     //   to: userEmail,
@@ -2246,33 +2358,678 @@ app.post('/apply-job', upload.single('cv'), async (req, res) => {
     //     <p>Thank you for your interest!</p>
     //   `
     // });
-    
+
     // Return success response
     return res.json({
       status: "success",
-      message: "Your application has been submitted successfully. 10 Solara tokens have been deducted. You will receive a response via email within 3-5 business days.",
+      message:
+        "Your application has been submitted successfully. 10 Solara tokens have been deducted. You will receive a response via email within 3-5 business days.",
       data: {
         applicationId: applicationId,
         jobId: jobId,
         appliedAt: new Date().toISOString(),
         status: "pending",
-        tokensRemaining: userData.solaraTokens - 10
-      }
+        tokensRemaining: userData.solaraTokens - 10,
+      },
     });
-    
   } catch (error) {
     console.error("Application error:", error);
-    
+
     if (error.message === "Insufficient tokens") {
-      return res.status(400).json({ 
-        status: "error", 
-        message: "Insufficient tokens. You need 10 Solara tokens to apply for this job." 
+      return res.status(400).json({
+        status: "error",
+        message:
+          "Insufficient tokens. You need 10 Solara tokens to apply for this job.",
       });
     }
+
+    return res.status(500).json({
+      status: "error",
+      message: "Something went wrong. Please try again later.",
+    });
+  }
+});
+
+// Helper function to make Paystack request
+function makePaystackRequest(options, params) {
+  return new Promise((resolve, reject) => {
+    if (!params || typeof params !== "string") {
+      reject(new Error("Invalid params"));
+      return;
+    }
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => {
+        if (chunk) data += chunk;
+      });
+      res.on("end", () => {
+        try {
+          const parsedData = data ? JSON.parse(data) : {};
+          resolve(parsedData);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.setTimeout(30000, () => {
+      req.destroy();
+      reject(new Error("Timeout"));
+    });
+    req.write(params);
+    req.end();
+  });
+}
+
+// Function to create transfer recipient
+function createTransferRecipient(accountNumber, bankCode, accountName) {
+  return new Promise((resolve, reject) => {
+    const params = JSON.stringify({
+      type: "bank_account",
+      name: accountName,
+      account_number: accountNumber,
+      bank_code: bankCode,
+      currency: "KES",
+    });
+
+    const options = {
+      hostname: "api.paystack.co",
+      port: 443,
+      path: "/transferrecipient",
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        "Content-Type": "application/json",
+      },
+    };
+
+    makePaystackRequest(options, params)
+      .then((response) => {
+        if (response.status) {
+          resolve(response.data.recipient_code);
+        } else {
+          reject(new Error(response.message));
+        }
+      })
+      .catch(reject);
+  });
+}
+
+// Function to initiate transfer
+function initiateTransfer(amount, recipientCode, reference, reason) {
+  return new Promise((resolve, reject) => {
+    const params = JSON.stringify({
+      source: "balance",
+      reason: reason,
+      amount: amount,
+      recipient: recipientCode,
+      reference: reference,
+      currency: "KES",
+    });
+
+    const options = {
+      hostname: "api.paystack.co",
+      port: 443,
+      path: "/transfer",
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        "Content-Type": "application/json",
+      },
+    };
+
+    makePaystackRequest(options, params)
+      .then((response) => {
+        if (response.status) {
+          resolve(response);
+        } else {
+          reject(new Error(response.message));
+        }
+      })
+      .catch(reject);
+  });
+}
+
+// ENDPOINT: Process withdrawal
+app.post("/process-withdrawal", async (req, res) => {
+  try {
+    const {
+      withdrawalId,
+      amount,
+      bankDetails,
+      withdrawMethod,
+      uid,
+      name,
+      email,
+      adminName,
+    } = req.body;
+
+    // Validate required fields
+    if (!withdrawalId || !amount || !bankDetails || !uid) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
+    }
+
+    // Update Firebase: Mark as processing
+    const withdrawalRef = firestore
+      .collection("WithdrawRequests")
+      .doc(withdrawalId);
+    await withdrawalRef.update({
+      status: "processing",
+      processedAt: new Date().toISOString(),
+      processedBy: adminName,
+      processingStartedAt: serverTimestamp(),
+    });
+
+    // Step 1: Create transfer recipient
+    const recipientCode = await createTransferRecipient(
+      bankDetails.accountNumber,
+      bankDetails.bankCode,
+      bankDetails.accountName,
+    );
+
+    // Step 2: Generate unique reference
+    const reference = `wd_${withdrawalId}_${Date.now()}`;
+
+    // Step 3: Initiate transfer
+    const transfer = await initiateTransfer(
+      amount,
+      recipientCode,
+      reference,
+      `Withdrawal for ${name || uid}`,
+    );
+
+    // Step 4: Update withdrawal request with success
+    await withdrawalRef.update({
+      status: "completed",
+      completedAt: new Date().toISOString(),
+      transferCode: transfer.data.transfer_code,
+      transferReference: transfer.data.reference,
+      recipientCode: recipientCode,
+      transferDetails: {
+        amount: amount,
+        status: transfer.data.status,
+        initiatedAt: new Date().toISOString(),
+      },
+    });
+
+    // Step 5: Update user's transaction subcollection
+    const transactionRef = firestore
+      .collection("Users")
+      .doc(uid)
+      .collection("transactions")
+      .doc();
+
+    await transactionRef.set({
+      amount: amount / 100, // Convert back to KES for display (if amount was in cents)
+      originalAmount: amount,
+      currency: "KES",
+      type: "withdrawal",
+      status: "completed",
+      withdrawMethod: withdrawMethod,
+      bankDetails: bankDetails,
+      transferCode: transfer.data.transfer_code,
+      transferReference: transfer.data.reference,
+      processedBy: adminName,
+      processedAt: new Date().toISOString(),
+      createdAt: serverTimestamp(),
+    });
+
+    // Step 6: Update user's account balance (deduct the amount)
+    const userRef = firestore.collection("Users").doc(uid);
+    const userSnap = await userRef.get();
+
+    if (userSnap.exists) {
+      const currentBalance = userSnap.data().accountBalance || 0;
+      const amountInKES = amount / 100; // Convert from cents to KES
+
+      await userRef.update({
+        accountBalance: currentBalance - amountInKES,
+        lastWithdrawalCompleted: new Date().toISOString(),
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Transfer completed successfully",
+      data: {
+        transferCode: transfer.data.transfer_code,
+        reference: transfer.data.reference,
+        status: transfer.data.status,
+      },
+    });
+  } catch (error) {
+    console.error("Process withdrawal error:", error);
+
+    // Update Firebase with failure
+    try {
+      const { withdrawalId, uid, amount } = req.body;
+
+      if (withdrawalId) {
+        const withdrawalRef = firestore
+          .collection("WithdrawRequests")
+          .doc(withdrawalId);
+        await withdrawalRef.update({
+          status: "failed",
+          failedAt: new Date().toISOString(),
+          failureReason: error.message,
+          errorDetails: error.toString(),
+        });
+      }
+
+      // Add failed transaction record
+      if (uid) {
+        const transactionRef = firestore
+          .collection("Users")
+          .doc(uid)
+          .collection("transactions")
+          .doc();
+
+        await transactionRef.set({
+          amount: req.body.amount ? req.body.amount / 100 : 0,
+          type: "withdrawal",
+          status: "failed",
+          withdrawMethod: req.body.withdrawMethod,
+          failureReason: error.message,
+          attemptedAt: new Date().toISOString(),
+          createdAt: serverTimestamp(),
+        });
+      }
+    } catch (dbError) {
+      console.error("Failed to update error status:", dbError);
+    }
+
+    res.status(500).json({
+      success: false,
+      message: error.message || "Transfer failed",
+    });
+  }
+});
+// ENDPOINT: Reject withdrawal
+// ENDPOINT: Reject withdrawal (UPDATES existing transaction)
+app.post("/reject-withdrawal", async (req, res) => {
+  try {
+    const {
+      withdrawalId,
+      adminName,
+      reason,
+      uid,
+      amount,
+      withdrawMethod,
+      bankDetails,
+      cryptoDetails,
+    } = req.body;
+
+    if (!withdrawalId) {
+      return res.status(400).json({
+        success: false,
+        message: "Withdrawal ID is required",
+      });
+    }
+
+    const withdrawalRef = firestore
+      .collection("WithdrawRequests")
+      .doc(withdrawalId);
     
-    return res.status(500).json({ 
-      status: "error", 
-      message: "Something went wrong. Please try again later." 
+    // Update withdrawal request status
+    await withdrawalRef.update({
+      status: "rejected",
+      rejectedAt: new Date().toISOString(),
+      processedBy: adminName,
+      rejectionReason: reason || "Rejected by admin",
+      rejectedAtTimestamp: serverTimestamp(),
+    });
+
+    // UPDATE existing transaction record instead of creating new one
+    if (uid) {
+      const transactionsRef = firestore
+        .collection("Users")
+        .doc(uid)
+        .collection("transactions");
+      
+      // Find the pending transaction for this withdrawal
+      const snapshot = await transactionsRef
+        .where("withdrawalId", "==", withdrawalId)
+        .where("status", "==", "pending")
+        .limit(1)
+        .get();
+      
+      if (!snapshot.empty) {
+        // Update existing transaction
+        const transactionDoc = snapshot.docs[0];
+        await transactionDoc.ref.update({
+          status: "rejected",
+          rejectionReason: reason || "Rejected by admin",
+          rejectedBy: adminName,
+          rejectedAt: new Date().toISOString(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        // If no pending transaction found (fallback), create one
+        console.log("No pending transaction found for withdrawal:", withdrawalId);
+        const transactionRef = firestore
+          .collection("Users")
+          .doc(uid)
+          .collection("transactions")
+          .doc();
+        
+        await transactionRef.set({
+          amount: amount || 0,
+          type: "withdrawal",
+          status: "rejected",
+          withdrawMethod: withdrawMethod || "Bank Transfer",
+          bankDetails: bankDetails || {},
+          cryptoDetails: cryptoDetails || {},
+          withdrawalId: withdrawalId,
+          rejectionReason: reason || "Rejected by admin",
+          rejectedBy: adminName,
+          rejectedAt: new Date().toISOString(),
+          createdAt: serverTimestamp(),
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Withdrawal rejected successfully",
+    });
+  } catch (error) {
+    console.error("Reject withdrawal error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to reject withdrawal",
+    });
+  }
+});
+// ENDPOINT: Mark crypto as sent (after manual Minisend transfer)
+app.post("/mark-crypto-sent", async (req, res) => {
+  try {
+    const { withdrawalId, transactionHash, notes, adminName } = req.body;
+
+    if (!withdrawalId) {
+      return res.status(400).json({
+        success: false,
+        message: "Withdrawal ID is required",
+      });
+    }
+
+    const withdrawalRef = firestore
+      .collection("WithdrawRequests")
+      .doc(withdrawalId);
+    const withdrawalDoc = await withdrawalRef.get();
+
+    if (!withdrawalDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        message: "Withdrawal not found",
+      });
+    }
+
+    const withdrawalData = withdrawalDoc.data();
+    const uid = withdrawalData.uid;
+
+    // Update withdrawal request with transaction hash
+    await withdrawalRef.update({
+      cryptoTransactionHash: transactionHash,
+      cryptoSentAt: new Date().toISOString(),
+      cryptoSentBy: adminName,
+      cryptoNotes: notes,
+      cryptoStatus: "sent_via_minisend",
+    });
+
+    // Update transaction subcollection
+    if (uid) {
+      const transactionsRef = firestore
+        .collection("Users")
+        .doc(uid)
+        .collection("transactions");
+
+      const snapshot = await transactionsRef
+        .where("withdrawalId", "==", withdrawalId)
+        .limit(1)
+        .get();
+
+      if (!snapshot.empty) {
+        const transactionDoc = snapshot.docs[0];
+        await transactionDoc.ref.update({
+          cryptoTransactionHash: transactionHash,
+          cryptoSentAt: new Date().toISOString(),
+          cryptoStatus: "sent_via_minisend",
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Crypto marked as sent",
+    });
+  } catch (error) {
+    console.error("Error marking crypto as sent:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// ENDPOINT: Process Crypto Withdrawal (Manual via Minisend)
+app.post("/process-crypto-withdrawal", async (req, res) => {
+  try {
+    const {
+      withdrawalId,
+      amount,
+      cryptoDetails,
+      withdrawMethod,
+      uid,
+      name,
+      email,
+      adminName,
+    } = req.body;
+
+    // Validate required fields
+    if (!withdrawalId || !amount || !cryptoDetails || !uid) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
+    }
+
+    // Get user reference
+    const userRef = firestore.collection("Users").doc(uid);
+    const userSnap = await userRef.get();
+
+    if (!userSnap.exists) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const userData = userSnap.data();
+    const currentBalance = userData.accountBalance || 0;
+
+    // Check if user has sufficient balance
+    if (currentBalance < amount) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient balance",
+      });
+    }
+
+    // Update withdrawal request status
+    const withdrawalRef = firestore
+      .collection("WithdrawRequests")
+      .doc(withdrawalId);
+    await withdrawalRef.update({
+      status: "completed",
+      completedAt: new Date().toISOString(),
+      processedBy: adminName,
+      processedAt: serverTimestamp(),
+      cryptoDetails: {
+        walletAddress: cryptoDetails.walletAddress,
+        network: cryptoDetails.network,
+        currency: cryptoDetails.currency || "USDT",
+        note: "To be sent manually via Minisend",
+      },
+    });
+
+    // Deduct amount from user's balance
+    const newBalance = currentBalance - amount;
+    await userRef.update({
+      accountBalance: newBalance,
+      lastCryptoWithdrawalAt: serverTimestamp(),
+    });
+
+    // Add transaction to user's transaction subcollection
+    const transactionRef = firestore
+      .collection("Users")
+      .doc(uid)
+      .collection("transactions")
+      .doc();
+
+    await transactionRef.set({
+      amount: amount,
+      type: "crypto_withdrawal",
+      status: "completed",
+      withdrawMethod: "Crypto Currency",
+      cryptoDetails: {
+        walletAddress: cryptoDetails.walletAddress,
+        network: cryptoDetails.network,
+        currency: cryptoDetails.currency || "USDT",
+        note: "Processed manually via Minisend",
+      },
+      processedBy: adminName,
+      balanceAfter: newBalance,
+      balanceBefore: currentBalance,
+      processedAt: new Date().toISOString(),
+      createdAt: serverTimestamp(),
+      withdrawalId: withdrawalId,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Crypto withdrawal completed successfully",
+      data: {
+        withdrawalId: withdrawalId,
+        amount: amount,
+        newBalance: newBalance,
+        walletAddress: cryptoDetails.walletAddress,
+        note: "Amount deducted from balance. Send crypto manually via Minisend.",
+      },
+    });
+  } catch (error) {
+    console.error("Process crypto withdrawal error:", error);
+
+    // Update Firebase with failure
+    try {
+      const { withdrawalId, uid, amount } = req.body;
+
+      if (withdrawalId) {
+        const withdrawalRef = firestore
+          .collection("WithdrawRequests")
+          .doc(withdrawalId);
+        await withdrawalRef.update({
+          status: "failed",
+          failedAt: new Date().toISOString(),
+          failureReason: error.message,
+          errorDetails: error.toString(),
+        });
+      }
+
+      // Add failed transaction record
+      if (uid) {
+        const transactionRef = firestore
+          .collection("Users")
+          .doc(uid)
+          .collection("transactions")
+          .doc();
+
+        await transactionRef.set({
+          amount: req.body.amount || 0,
+          type: "crypto_withdrawal",
+          status: "failed",
+          withdrawMethod: "Crypto Currency",
+          failureReason: error.message,
+          attemptedAt: new Date().toISOString(),
+          createdAt: serverTimestamp(),
+        });
+      }
+    } catch (dbError) {
+      console.error("Failed to update error status:", dbError);
+    }
+
+    res.status(500).json({
+      success: false,
+      message: error.message || "Crypto withdrawal failed",
+    });
+  }
+});
+
+// ENDPOINT: Get transfer status
+app.get("/transfer-status/:reference", async (req, res) => {
+  try {
+    const { reference } = req.params;
+
+    const options = {
+      hostname: "api.paystack.co",
+      port: 443,
+      path: `/transfer/verify/${reference}`,
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+      },
+    };
+
+    const response = await makePaystackRequest(options, "");
+
+    res.status(200).json({
+      success: response.status,
+      data: response.data,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// ENDPOINT: Get user transaction history
+app.get("/user-transactions/:uid", async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const { limit = 50 } = req.query;
+
+    const transactionsRef = firestore
+      .collection("Users")
+      .doc(uid)
+      .collection("transactions")
+      .orderBy("createdAt", "desc")
+      .limit(parseInt(limit));
+
+    const snapshot = await transactionsRef.get();
+
+    const transactions = [];
+    snapshot.forEach((doc) => {
+      transactions.push({
+        id: doc.id,
+        ...doc.data(),
+      });
+    });
+
+    res.status(200).json({
+      success: true,
+      data: transactions,
+    });
+  } catch (error) {
+    console.error("Error fetching transactions:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
     });
   }
 });
