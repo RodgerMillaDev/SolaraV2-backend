@@ -5,6 +5,7 @@ const cors = require("cors");
 const path = require("path");
 const port = 3322;
 const app = express();
+const nodemailer = require("nodemailer")
 const admin = require("firebase-admin");
 const https = require("https");
 const axios = require("axios");
@@ -3033,3 +3034,46 @@ app.get("/user-transactions/:uid", async (req, res) => {
     });
   }
 });
+
+const transporter = nodemailer.createTransport({
+  host: process.env.HAK,
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.EM_USER,
+    pass: process.env.EM_PASS,
+  },
+  tls: {
+    servername: process.env.HAK,
+  },
+});
+
+
+sendEmail()
+async function sendEmail( emUser, nameUser, subject, body) {
+  
+
+
+  // /* ---- BASIC VALIDATION ---- */
+  // if (!emUser || !nameUser || !body) {
+  //  console.log("missing data email")
+  // }
+
+  try {
+    /* ---- SEND TO BUSINESS ---- */
+    await transporter.sendMail({
+      from: `"Solara Jobs" <${process.env.EM_USER}>`,
+      to: "rodgermilladev@gmail.com",
+      subject: "We Are Testing" ,
+      text: "The test body",
+    });
+
+    console.log("✅ Email sent to user");
+
+
+  } catch (error) {
+    console.error("❌ Email error:", error);
+
+   
+  }
+};
