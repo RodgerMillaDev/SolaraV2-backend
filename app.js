@@ -1792,6 +1792,8 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
       });
     }
 
+    const withdrawreference = `wd_${uid}_${Date.now()}`;
+
     // 📝 8. Create withdrawal request
     await firestore.collection("WithdrawRequests").add({
       uid,
@@ -1802,13 +1804,16 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
       email:userEmail,
       bankDetails,
       cryptoDetails,
+      withdrawreference,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+
+
     const transactionRef = firestore
       .collection("Users")
       .doc(uid)
       .collection("transactions")
-      .doc();
+      .doc(withdrawreference);
 
     await transactionRef.set({
       amount: withdrawAmount,
@@ -2598,11 +2603,11 @@ function initiateTransfer(amount, recipientCode, reference, reason) {
 }
 
 // ENDPOINT: Process withdrawal
-// ENDPOINT: Process withdrawal
 app.post("/process-withdrawal", async (req, res) => {
   try {
     const {
       withdrawalId,
+      withdrawreference,
       amount,
       bankDetails,
       withdrawMethod,
@@ -2611,6 +2616,8 @@ app.post("/process-withdrawal", async (req, res) => {
       email,
       adminName,
     } = req.body;
+
+    console.log("this is the amount from front end"+" " + amount)
 
     // Validate required fields
     if (!withdrawalId || !amount || !bankDetails || !uid) {
@@ -2638,14 +2645,13 @@ app.post("/process-withdrawal", async (req, res) => {
       bankDetails.accountName,
     );
 
-    // Step 2: Generate unique reference
-    const reference = `wd_${withdrawalId}_${Date.now()}`;
+   
 
     // Step 3: Initiate transfer
     const transfer = await initiateTransfer(
       amount,
       recipientCode,
-      reference,
+            withdrawreference,
       `Withdrawal for ${name || uid}`,
     );
 
