@@ -2567,7 +2567,7 @@ function initiateTransfer(amount, recipientCode, reference, reason) {
     const params = JSON.stringify({
       source: "balance",
       reason: reason,
-      amount: amount*130,
+      amount: amount * 125,
       recipient: recipientCode,
       reference: reference,
       currency: "KES",
@@ -2596,6 +2596,7 @@ function initiateTransfer(amount, recipientCode, reference, reason) {
   });
 }
 
+// ENDPOINT: Process withdrawal
 // ENDPOINT: Process withdrawal
 app.post("/process-withdrawal", async (req, res) => {
   try {
@@ -2647,6 +2648,9 @@ app.post("/process-withdrawal", async (req, res) => {
       `Withdrawal for ${name || uid}`,
     );
 
+    // Calculate KES amount for records
+    const amountInKES = amount * 130;
+
     // Step 4: Update withdrawal request with success
     await withdrawalRef.update({
       status: "completed",
@@ -2654,56 +2658,84 @@ app.post("/process-withdrawal", async (req, res) => {
       transferCode: transfer.data.transfer_code,
       transferReference: transfer.data.reference,
       recipientCode: recipientCode,
+      amountUSD: amount,
+      amountKES: amountInKES,
+      exchangeRate: 130,
       transferDetails: {
-        amount: amount,
+        amountUSD: amount,
+        amountKES: amountInKES,
         status: transfer.data.status,
         initiatedAt: new Date().toISOString(),
       },
     });
 
-    // Step 5: Update user's transaction subcollection
+    // Step 5: UPDATE existing transaction document (using withdrawalId as the document ID)
     const transactionRef = firestore
       .collection("Users")
       .doc(uid)
       .collection("transactions")
-      .doc();
+      .doc(withdrawalId);
 
-    await transactionRef.set({
-      amount: amount,
-      originalAmount: amount,
-      currency: "USD",
-      type: "withdrawal",
-      status: "completed",
-      withdrawMethod: withdrawMethod,
-      bankDetails: bankDetails,
-      transferCode: transfer.data.transfer_code,
-      transferReference: transfer.data.reference,
-      processedBy: adminName,
-      processedAt: new Date().toISOString(),
-      createdAt: serverTimestamp(),
-    });
+    const transactionDoc = await transactionRef.get();
 
-    // Step 6: Update user's account balance (deduct the amount)
+    if (transactionDoc.exists) {
+      // Update existing transaction
+      await transactionRef.update({
+        status: "completed",
+        amountUSD: amount,
+        amountKES: amountInKES,
+        exchangeRate: 130,
+        currency: "USD",
+        type: "withdrawal",
+        withdrawMethod: withdrawMethod,
+        bankDetails: bankDetails,
+        transferCode: transfer.data.transfer_code,
+        transferReference: transfer.data.reference,
+        processedBy: adminName,
+        processedAt: new Date().toISOString(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      // Create new transaction if doesn't exist (fallback)
+      await transactionRef.set({
+        amountUSD: amount,
+        amountKES: amountInKES,
+        exchangeRate: 130,
+        currency: "USD",
+        type: "withdrawal",
+        status: "completed",
+        withdrawMethod: withdrawMethod,
+        bankDetails: bankDetails,
+        transferCode: transfer.data.transfer_code,
+        transferReference: transfer.data.reference,
+        processedBy: adminName,
+        processedAt: new Date().toISOString(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    // Step 6: Update user's account balance (deduct the correct amount)
     const userRef = firestore.collection("Users").doc(uid);
     const userSnap = await userRef.get();
 
     if (userSnap.exists) {
       const currentBalance = userSnap.data().accountBalance || 0;
-      const amountInKES = amount / 100; // Convert from cents to KES
+      // Deduct the USD amount directly (not divided by anything)
+      const newBalance = currentBalance - amount;
 
       await userRef.update({
-        accountBalance: currentBalance - amountInKES,
+        accountBalance: newBalance,
         lastWithdrawalCompleted: new Date().toISOString(),
       });
+      
+      console.log(`Balance updated: $${currentBalance} USD -> $${newBalance} USD`);
     }
 
-
-
-        // send email 
-
-const emailUser = email;
-const subject = "Withdrawal Request Approved - Solara Jobs";
-const body = `
+    // Send email notification
+    const emailUser = email;
+    const subject = "Withdrawal Request Approved - Solara Jobs";
+    const body = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -2722,8 +2754,8 @@ const body = `
             <td style="padding: 32px 40px 24px; text-align: center; background: linear-gradient(135deg, #0d0a22 0%, #1a0e69 100%);">
               <img src="https://solara-ver2.web.app/static/media/favIcon.8db8a902a3252e8211b5.png" alt="Solara Jobs" style="height: 50px; width: auto; max-width: 200px;">
               <div style="font-size: 20px; color: #ffffff; margin-top: 10px; letter-spacing: -1px;">Solara Jobs</div>
-             </td>
-           </tr>
+              </td>
+            </tr>
           
           <!-- Main Content -->
           <tr>
@@ -2741,8 +2773,8 @@ const body = `
               <!-- Withdrawal Amount -->
               <div style="background-color: #f3f4f6; padding: 20px; margin-bottom: 24px; border-radius: 8px; text-align: center;">
                 <p style="margin: 0 0 8px; font-size: 14px; color: #6b7280; font-weight: 500;">AMOUNT DISBURSED</p>
-                <p style="margin: 0; font-size: 36px; font-weight: bold; color: #5a00c0;">$${amount}</p>
-                <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280;">USD - United States Dollar</p>
+                <p style="margin: 0; font-size: 36px; font-weight: bold; color: #5a00c0;">$${amount} USD</p>
+                <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280;">≈ ${amountInKES.toLocaleString()} KES (Exchange rate: 1 USD = 130 KES)</p>
               </div>
               
               <!-- Bank Details -->
@@ -2771,7 +2803,7 @@ const body = `
                   <li style="margin-bottom: 8px;">Funds have been transferred to your registered bank account</li>
                   <li style="margin-bottom: 8px;">Please allow 1-3 business days for the amount to reflect in your account</li>
                   <li style="margin-bottom: 8px;">A confirmation receipt has been sent to your registered email</li>
-                  <li style="margin-bottom: 8px;">Check your bank statement for the credited amount</li>
+                  <li style="margin-bottom: 8px;">Check your bank statement for the credited amount in KES</li>
                 </ul>
               </div>
               
@@ -2789,8 +2821,8 @@ const body = `
                 We appreciate your trust in us.
               </p>
               
-             </td>
-           </tr>
+            </td>
+          </tr>
           
           <!-- Footer -->
           <tr>
@@ -2801,19 +2833,18 @@ const body = `
               <p style="margin: 0; font-size: 11px; color: #adb5bd;">
                 This is an automated message, please do not reply directly to this email.
               </p>
-             </td>
-           </tr>
+            </td>
+          </tr>
           
-         </table>
-       </td>
-     </tr>
-   </table>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
 `;
 
-sendEmail(emailUser,subject,body)
-
+    await sendEmail(emailUser, subject, body);
 
     res.status(200).json({
       success: true,
@@ -2822,6 +2853,9 @@ sendEmail(emailUser,subject,body)
         transferCode: transfer.data.transfer_code,
         reference: transfer.data.reference,
         status: transfer.data.status,
+        amountUSD: amount,
+        amountKES: amountInKES,
+        exchangeRate: 130,
       },
     });
   } catch (error) {
@@ -2843,23 +2877,40 @@ sendEmail(emailUser,subject,body)
         });
       }
 
-      // Add failed transaction record
-      if (uid) {
+      // Update existing transaction document with failure status
+      if (uid && withdrawalId) {
         const transactionRef = firestore
           .collection("Users")
           .doc(uid)
           .collection("transactions")
-          .doc();
-
-        await transactionRef.set({
-          amount: req.body.amount ? req.body.amount / 100 : 0,
-          type: "withdrawal",
-          status: "failed",
-          withdrawMethod: req.body.withdrawMethod,
-          failureReason: error.message,
-          attemptedAt: new Date().toISOString(),
-          createdAt: serverTimestamp(),
-        });
+          .doc(withdrawalId);
+        
+        const transactionDoc = await transactionRef.get();
+        
+        if (transactionDoc.exists) {
+          await transactionRef.update({
+            status: "failed",
+            failureReason: error.message,
+            failedAt: new Date().toISOString(),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          // Create failed transaction record if doesn't exist
+          await transactionRef.set({
+            amountUSD: amount || 0,
+            amountKES: amount ? amount * 130 : 0,
+            exchangeRate: 130,
+            currency: "USD",
+            type: "withdrawal",
+            status: "failed",
+            withdrawMethod: req.body.withdrawMethod,
+            bankDetails: req.body.bankDetails,
+            failureReason: error.message,
+            attemptedAt: new Date().toISOString(),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
       }
     } catch (dbError) {
       console.error("Failed to update error status:", dbError);
