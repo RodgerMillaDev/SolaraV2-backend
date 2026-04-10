@@ -1574,8 +1574,7 @@ app.post("/uploadTranslationTask", upload.none(), async (req, res) => {
   const { taskType, content, uid, jobpay, trnsLang } = req.body;
 
   // Only allow admins
-  // if (!adminUIDS.includes(uid)) {
-  if (!uid) {
+  if (!adminUIDS.includes(uid)) {
     return res.status(403).json({
       status: 403,
       msg: "You do not have access",
@@ -1636,8 +1635,7 @@ app.post("/uploadFactCheckTask", upload.none(), async (req, res) => {
   const { taskType, explanation, statement, verdict, jobpay, uid } = req.body;
 
   // Only allow admins
-  // if (!adminUIDS.includes(uid)) {
-  if (!uid) {
+  if (!adminUIDS.includes(uid)) {
     return res.status(403).json({
       status: 403,
       msg: "You do not have access",
@@ -2537,7 +2535,7 @@ function createTransferRecipient(accountNumber, bankCode, accountName) {
       name: accountName,
       account_number: accountNumber,
       bank_code: bankCode,
-      currency: "KES",
+      currency: "USD",
     });
 
     const options = {
@@ -2572,7 +2570,7 @@ function initiateTransfer(amount, recipientCode, reference, reason) {
       amount: amount,
       recipient: recipientCode,
       reference: reference,
-      currency: "KES",
+      currency: "USD",
     });
 
     const options = {
@@ -2671,9 +2669,9 @@ app.post("/process-withdrawal", async (req, res) => {
       .doc();
 
     await transactionRef.set({
-      amount: amount / 100, // Convert back to KES for display (if amount was in cents)
+      amount: amount,
       originalAmount: amount,
-      currency: "KES",
+      currency: "USD",
       type: "withdrawal",
       status: "completed",
       withdrawMethod: withdrawMethod,
