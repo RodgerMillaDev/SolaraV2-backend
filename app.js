@@ -2563,6 +2563,7 @@ function createTransferRecipient(accountNumber, bankCode, accountName) {
 
 // Function to initiate transfer
 function initiateTransfer(amount, recipientCode, reference, reason) {
+  console.log("this is the amount in initate transfer" +" "+amount)
   return new Promise((resolve, reject) => {
     const params = JSON.stringify({
       source: "balance",
@@ -2649,7 +2650,7 @@ app.post("/process-withdrawal", async (req, res) => {
     );
 
     // Calculate KES amount for records
-    const amountInKES = amount * 130;
+    const amountInKES = amount * 125;
 
     // Step 4: Update withdrawal request with success
     await withdrawalRef.update({
@@ -2660,7 +2661,7 @@ app.post("/process-withdrawal", async (req, res) => {
       recipientCode: recipientCode,
       amountUSD: amount,
       amountKES: amountInKES,
-      exchangeRate: 130,
+      exchangeRate: 125,
       transferDetails: {
         amountUSD: amount,
         amountKES: amountInKES,
@@ -2684,7 +2685,7 @@ app.post("/process-withdrawal", async (req, res) => {
         status: "completed",
         amountUSD: amount,
         amountKES: amountInKES,
-        exchangeRate: 130,
+        exchangeRate: 125,
         currency: "USD",
         type: "withdrawal",
         withdrawMethod: withdrawMethod,
@@ -2757,7 +2758,7 @@ app.post("/process-withdrawal", async (req, res) => {
               <div style="background-color: #f3f4f6; padding: 20px; margin-bottom: 24px; border-radius: 8px; text-align: center;">
                 <p style="margin: 0 0 8px; font-size: 14px; color: #6b7280; font-weight: 500;">AMOUNT DISBURSED</p>
                 <p style="margin: 0; font-size: 36px; font-weight: bold; color: #5a00c0;">$${amount} USD</p>
-                <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280;">≈ ${amountInKES.toLocaleString()} KES (Exchange rate: 1 USD = 130 KES)</p>
+                <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280;">≈ ${amountInKES.toLocaleString()} KES (Exchange rate: 1 USD = 125 KES)</p>
               </div>
               
               <!-- Bank Details -->
