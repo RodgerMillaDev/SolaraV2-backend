@@ -1800,8 +1800,8 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
       name: userData.name, // ✅ always from DB
       amount: withdrawAmount,
       status: "pending",
-
       withdrawMethod,
+      email:userEmail,
       bankDetails,
       cryptoDetails,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2883,6 +2883,7 @@ app.post("/reject-withdrawal", async (req, res) => {
       reason,
       uid,
       name,
+      email,
       amount,
       withdrawMethod,
       bankDetails,
