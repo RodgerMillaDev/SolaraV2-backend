@@ -1846,7 +1846,104 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
     // send email (your existing email code)
     const emailUser = userEmail;
     const subject = "Withdrawal Request Submitted - Solara Jobs";
-    const body = `...`; // Your existing email HTML
+    const body =
+    ` <!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Withdrawal Request Confirmation</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f5f5f5;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f5f5f5; padding: 40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); overflow: hidden;">
+          
+          <!-- Header with Image Logo -->
+          <tr>
+            <td style="padding: 32px 40px 24px; text-align: center; background: linear-gradient(135deg, #0d0a22 0%, #1a0e69 100%);">
+              <img src="https://solara-ver2.web.app/static/media/favIcon.8db8a902a3252e8211b5.png" alt="Solara Jobs" style="height: 50px; width: auto; max-width: 200px;">
+              <div style="font-size: 20px; color: #ffffff; margin-top: 10px; letter-spacing: -1px;">Solara Jobs</div>
+             </td>
+           </tr>
+          
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 40px;">
+              
+              <!-- Greeting -->
+              <h2 style="margin: 0 0 8px; font-size: 24px; color: #5a00c0;">Hello ${name},</h2>
+              <p style="margin: 0 0 24px; color: #555555; font-size: 16px; line-height: 1.5;">We have received your withdrawal request and it is now being processed.</p>
+              
+              <!-- Withdrawal Amount -->
+              <div style="background-color: #f3f4f6; padding: 20px; margin-bottom: 24px; border-radius: 8px; text-align: center;">
+                <p style="margin: 0 0 8px; font-size: 14px; color: #6b7280; font-weight: 500;">WITHDRAWAL AMOUNT</p>
+                <p style="margin: 0; font-size: 36px; font-weight: bold; color: #5a00c0;">$${amount}</p>
+                <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280;">USD - United States Dollar</p>
+              </div>
+              
+              <!-- Status Badge -->
+              <div style=" padding: 16px 00px; margin-bottom: 24px; border-radius: 0px;">
+                <p style="margin: 0; color: #166534; font-weight: 500;">Request Status: <strong>Pending</strong></p>
+              </div>
+              
+              <!-- Important Notice -->
+              <div style="background-color: #fff7ed; padding: 20px; margin-bottom: 24px; border-radius: 0px;">
+                <p style="margin: 0 0 8px; font-weight: 600; color: #9a3412;">Important: Disbursement Schedule</p>
+                <p style="margin: 0; color: #431407; font-size: 14px; line-height: 1.5;">
+                  All withdrawal requests are processed and disbursed on <strong style="color: #ea580c;">Tuesdays</strong>. 
+                  Please ensure your request is submitted before Tuesday to be included in the upcoming disbursement.
+                </p>
+              </div>
+              
+              <!-- What to Expect -->
+              <div style="margin-bottom: 24px;">
+                <p style="font-weight: 600; color: #1a1a1a; margin-bottom: 12px;">What happens next?</p>
+                <ul style="margin: 0; padding-left: 20px; color: #555555; line-height: 1.6;">
+                  <li style="margin-bottom: 8px;">Our finance team will review your request within 24-48 hours</li>
+                  <li style="margin-bottom: 8px;">Funds will be disbursed on the upcoming Tuesday</li>
+                  <li style="margin-bottom: 8px;">You will receive a confirmation email once the transfer is initiated</li>
+                  <li style="margin-bottom: 8px;">Processing may take 1-3 business days depending on your selected payment method.</li>
+                </ul>
+              </div>
+              
+              <!-- Contact Support -->
+              <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px; text-align: center;">
+                <p style="margin: 0 0 8px; font-weight: 600; color: #1e293b;">Need assistance?</p>
+                <p style="margin: 0; color: #64748b; font-size: 14px;">
+                  Contact our support team at <a href="mailto:support@solarajobs.com" style="color: #5a00c0; text-decoration: none;">support@solarajobs.com</a>
+                </p>
+              </div>
+              
+              <!-- Thank You -->
+              <p style="margin: 24px 0 0; color: #555555; text-align: center; font-size: 14px;">
+                Thank you for choosing Solara Jobs.<br>
+                We appreciate your trust in us.
+              </p>
+              
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8f9fa; padding: 24px 40px; text-align: center; border-top: 1px solid #e9ecef;">
+              <p style="margin: 0 0 12px; font-size: 12px; color: #6c757d;">
+                Solara Jobs | Professional Workforce Solutions
+              </p>
+              <p style="margin: 0; font-size: 11px; color: #adb5bd;">
+                This is an automated message, please do not reply directly to this email.
+              </p>
+            </td>
+          </tr>
+          
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;; // Your existing email HTML
     
     sendEmail(emailUser, subject, body);
 
