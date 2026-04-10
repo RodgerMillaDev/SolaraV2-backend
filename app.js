@@ -2696,23 +2696,7 @@ app.post("/process-withdrawal", async (req, res) => {
         updatedAt: serverTimestamp(),
       });
     } else {
-      // Create new transaction if doesn't exist (fallback)
-      await transactionRef.set({
-        amountUSD: amount,
-        amountKES: amountInKES,
-        exchangeRate: 130,
-        currency: "USD",
-        type: "withdrawal",
-        status: "completed",
-        withdrawMethod: withdrawMethod,
-        bankDetails: bankDetails,
-        transferCode: transfer.data.transfer_code,
-        transferReference: transfer.data.reference,
-        processedBy: adminName,
-        processedAt: new Date().toISOString(),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      console.log("Transaction doesnt exist")
     }
 
     // Step 6: Update user's account balance (deduct the correct amount)
@@ -2723,7 +2707,6 @@ app.post("/process-withdrawal", async (req, res) => {
       const currentBalance = userSnap.data().accountBalance || 0;
       // Deduct the USD amount directly (not divided by anything)
       const newBalance = currentBalance - amount;
-
       await userRef.update({
         accountBalance: newBalance,
         lastWithdrawalCompleted: new Date().toISOString(),
