@@ -3440,7 +3440,7 @@ async function sendEmail( emailUser, subject, body) {
       from: `"Solara Jobs" <${process.env.EM_USER}>`,
       to: emailUser,
       subject: subject ,
-      text: body,
+      html: body,
     });
 
     console.log("✅ Email sent to user");
