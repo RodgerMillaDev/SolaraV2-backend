@@ -3003,7 +3003,7 @@ const body = `
                 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size: 14px;">
                   <tr style="border-bottom: 1px solid #e2e8f0;">
                     <td style="padding: 8px 0; color: #64748b; width: 140px;">Method:</td>
-                    <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">${method}</td>
+                    <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">${withdrawMethod}</td>
                   </tr>
                   <tr style="border-bottom: 1px solid #e2e8f0;">
                     <td style="padding: 8px 0; color: #64748b;">Amount:</td>
