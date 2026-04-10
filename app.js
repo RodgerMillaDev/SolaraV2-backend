@@ -2526,8 +2526,6 @@ function makePaystackRequest(options, params) {
     req.end();
   });
 }
-// Fixed exchange rate
-const USD_TO_KES_RATE = 125;
 
 // Function to create transfer recipient
 function createTransferRecipient(accountNumber, bankCode, accountName) {
@@ -2564,17 +2562,12 @@ function createTransferRecipient(accountNumber, bankCode, accountName) {
 }
 
 // Function to initiate transfer
-function initiateTransfer(amountInUSD, recipientCode, reference, reason) {
+function initiateTransfer(amount, recipientCode, reference, reason) {
   return new Promise((resolve, reject) => {
-    // Convert USD to KES using fixed rate
-    const amountInKES = Math.round(amountInUSD * USD_TO_KES_RATE);
-    
-    console.log(`Converting $${amountInUSD} USD to ${amountInKES} KES (Rate: ${USD_TO_KES_RATE})`);
-    
     const params = JSON.stringify({
       source: "balance",
       reason: reason,
-      amount: amountInKES, // Amount in KES (smallest unit is 1 KES)
+      amount: amount*130,
       recipient: recipientCode,
       reference: reference,
       currency: "KES",
@@ -2608,7 +2601,7 @@ app.post("/process-withdrawal", async (req, res) => {
   try {
     const {
       withdrawalId,
-      amount, // This should be in USD
+      amount,
       bankDetails,
       withdrawMethod,
       uid,
@@ -2625,11 +2618,6 @@ app.post("/process-withdrawal", async (req, res) => {
       });
     }
 
-    // Parse bankDetails if it's a string
-    const parsedBankDetails = typeof bankDetails === 'string' 
-      ? JSON.parse(bankDetails) 
-      : bankDetails;
-
     // Update Firebase: Mark as processing
     const withdrawalRef = firestore
       .collection("WithdrawRequests")
@@ -2643,24 +2631,21 @@ app.post("/process-withdrawal", async (req, res) => {
 
     // Step 1: Create transfer recipient
     const recipientCode = await createTransferRecipient(
-      parsedBankDetails.accountNumber,
-      parsedBankDetails.bankCode,
-      parsedBankDetails.accountName,
+      bankDetails.accountNumber,
+      bankDetails.bankCode,
+      bankDetails.accountName,
     );
 
     // Step 2: Generate unique reference
     const reference = `wd_${withdrawalId}_${Date.now()}`;
 
-    // Step 3: Initiate transfer (amount in USD, function converts to KES)
+    // Step 3: Initiate transfer
     const transfer = await initiateTransfer(
       amount,
       recipientCode,
       reference,
       `Withdrawal for ${name || uid}`,
     );
-
-    // Calculate KES amount for records
-    const amountInKES = Math.round(amount * USD_TO_KES_RATE);
 
     // Step 4: Update withdrawal request with success
     await withdrawalRef.update({
@@ -2669,12 +2654,8 @@ app.post("/process-withdrawal", async (req, res) => {
       transferCode: transfer.data.transfer_code,
       transferReference: transfer.data.reference,
       recipientCode: recipientCode,
-      amountUSD: amount,
-      amountKES: amountInKES,
-      exchangeRate: USD_TO_KES_RATE,
       transferDetails: {
-        amountUSD: amount,
-        amountKES: amountInKES,
+        amount: amount,
         status: transfer.data.status,
         initiatedAt: new Date().toISOString(),
       },
@@ -2688,15 +2669,13 @@ app.post("/process-withdrawal", async (req, res) => {
       .doc();
 
     await transactionRef.set({
-      amountUSD: amount,
-      amountKES: amountInKES,
-      exchangeRate: USD_TO_KES_RATE,
+      amount: amount,
       originalAmount: amount,
       currency: "USD",
       type: "withdrawal",
       status: "completed",
       withdrawMethod: withdrawMethod,
-      bankDetails: parsedBankDetails,
+      bankDetails: bankDetails,
       transferCode: transfer.data.transfer_code,
       transferReference: transfer.data.reference,
       processedBy: adminName,
@@ -2704,27 +2683,27 @@ app.post("/process-withdrawal", async (req, res) => {
       createdAt: serverTimestamp(),
     });
 
-    // Step 6: Update user's account balance (deduct the amount in USD)
+    // Step 6: Update user's account balance (deduct the amount)
     const userRef = firestore.collection("Users").doc(uid);
     const userSnap = await userRef.get();
 
     if (userSnap.exists) {
       const currentBalance = userSnap.data().accountBalance || 0;
-      // Deduct the USD amount (balance is stored in USD)
-      const newBalance = currentBalance - amount;
+      const amountInKES = amount / 100; // Convert from cents to KES
 
       await userRef.update({
-        accountBalance: newBalance,
+        accountBalance: currentBalance - amountInKES,
         lastWithdrawalCompleted: new Date().toISOString(),
       });
-      
-      console.log(`Balance updated: $${currentBalance} USD -> $${newBalance} USD`);
     }
 
-    // Send email notification
-    const emailUser = email;
-    const subject = "Withdrawal Request Approved - Solara Jobs";
-    const body = `
+
+
+        // send email 
+
+const emailUser = email;
+const subject = "Withdrawal Request Approved - Solara Jobs";
+const body = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -2762,8 +2741,8 @@ app.post("/process-withdrawal", async (req, res) => {
               <!-- Withdrawal Amount -->
               <div style="background-color: #f3f4f6; padding: 20px; margin-bottom: 24px; border-radius: 8px; text-align: center;">
                 <p style="margin: 0 0 8px; font-size: 14px; color: #6b7280; font-weight: 500;">AMOUNT DISBURSED</p>
-                <p style="margin: 0; font-size: 36px; font-weight: bold; color: #5a00c0;">$${amount} USD</p>
-                <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280;">≈ ${amountInKES.toLocaleString()} KES (Exchange rate: 1 USD = ${USD_TO_KES_RATE} KES)</p>
+                <p style="margin: 0; font-size: 36px; font-weight: bold; color: #5a00c0;">$${amount}</p>
+                <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280;">USD - United States Dollar</p>
               </div>
               
               <!-- Bank Details -->
@@ -2772,15 +2751,15 @@ app.post("/process-withdrawal", async (req, res) => {
                 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size: 14px;">
                   <tr style="border-bottom: 1px solid #e2e8f0;">
                     <td style="padding: 8px 0; color: #64748b; width: 140px;">Bank Name:</td>
-                    <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">${parsedBankDetails.bankName}</td>
+                    <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">${bankDetails.bankName}</td>
                   </tr>
                   <tr style="border-bottom: 1px solid #e2e8f0;">
                     <td style="padding: 8px 0; color: #64748b;">Account Name:</td>
-                    <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">${parsedBankDetails.accountName}</td>
+                    <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">${bankDetails.accountName}</td>
                   </tr>
                   <tr>
                     <td style="padding: 8px 0; color: #64748b;">Account Number:</td>
-                    <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">${parsedBankDetails.accountNumber}</td>
+                    <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">${bankDetails.accountNumber}</td>
                   </tr>
                 </table>
               </div>
@@ -2792,7 +2771,7 @@ app.post("/process-withdrawal", async (req, res) => {
                   <li style="margin-bottom: 8px;">Funds have been transferred to your registered bank account</li>
                   <li style="margin-bottom: 8px;">Please allow 1-3 business days for the amount to reflect in your account</li>
                   <li style="margin-bottom: 8px;">A confirmation receipt has been sent to your registered email</li>
-                  <li style="margin-bottom: 8px;">Check your bank statement for the credited amount in KES</li>
+                  <li style="margin-bottom: 8px;">Check your bank statement for the credited amount</li>
                 </ul>
               </div>
               
@@ -2810,8 +2789,8 @@ app.post("/process-withdrawal", async (req, res) => {
                 We appreciate your trust in us.
               </p>
               
-            </td>
-           </td>
+             </td>
+           </tr>
           
           <!-- Footer -->
           <tr>
@@ -2822,18 +2801,19 @@ app.post("/process-withdrawal", async (req, res) => {
               <p style="margin: 0; font-size: 11px; color: #adb5bd;">
                 This is an automated message, please do not reply directly to this email.
               </p>
-            </td>
-          </tr>
+             </td>
+           </tr>
           
-        </table>
-      </td>
-    </tr>
-  </table>
+         </table>
+       </td>
+     </tr>
+   </table>
 </body>
 </html>
 `;
 
-    await sendEmail(emailUser, subject, body);
+sendEmail(emailUser,subject,body)
+
 
     res.status(200).json({
       success: true,
@@ -2842,9 +2822,6 @@ app.post("/process-withdrawal", async (req, res) => {
         transferCode: transfer.data.transfer_code,
         reference: transfer.data.reference,
         status: transfer.data.status,
-        amountUSD: amount,
-        amountKES: amountInKES,
-        exchangeRate: USD_TO_KES_RATE,
       },
     });
   } catch (error) {
@@ -2875,9 +2852,7 @@ app.post("/process-withdrawal", async (req, res) => {
           .doc();
 
         await transactionRef.set({
-          amountUSD: amount || 0,
-          amountKES: amount ? Math.round(amount * USD_TO_KES_RATE) : 0,
-          exchangeRate: USD_TO_KES_RATE,
+          amount: req.body.amount ? req.body.amount / 100 : 0,
           type: "withdrawal",
           status: "failed",
           withdrawMethod: req.body.withdrawMethod,
