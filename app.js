@@ -820,7 +820,7 @@ wss.on("connection", (ws) => {
               const refinedErrors = await checkText(data.refinedText);
 
               let aiScore =
-                100 - refinedErrors * 10 + (originalErrors - refinedErrors) * 5;
+              100 - refinedErrors * 10 + (originalErrors - refinedErrors) * 5;
               aiScore = Math.max(0, Math.min(100, aiScore));
 
               const userRef = firestore.collection("Users").doc(data.uid);
@@ -845,7 +845,7 @@ wss.on("connection", (ws) => {
                 const currentPoints = userSnap.data().accountPoints || 0;
 
                 let pointsEarned = 0;
-                if (aiScore >= 80) {
+                if (aiScore >= 96) {
                   const payPercent = aiScore / 100;
                   const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
                   payOut = Math.round(fullPay * payPercent * 100) / 100; // ✅ Rounds to 2 decimals
@@ -1024,7 +1024,7 @@ wss.on("connection", (ws) => {
 
                 let pointsEarned = 0;
 
-                if (aiScore >= 70) {
+                if (aiScore >= 85) {
                   const payPercent = aiScore / 100;
                   const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
                   payOut = Math.round(fullPay * payPercent * 100) / 100; // ✅ Rounds to 2 decimals
