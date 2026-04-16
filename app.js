@@ -2678,7 +2678,7 @@ function makePaystackRequest(options, params) {
 function createTransferRecipient(accountNumber, bankCode, accountName) {
   return new Promise((resolve, reject) => {
     const params = JSON.stringify({
-      type: "bank_account",
+      type: "kepss",
       name: accountName,
       account_number: accountNumber,
       bank_code: bankCode,
