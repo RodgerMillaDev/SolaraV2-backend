@@ -2710,37 +2710,158 @@ function createTransferRecipient(accountNumber, bankCode, accountName) {
 
 // Function to initiate transfer
 function initiateTransfer(amount, recipientCode, reference, reason) {
-  console.log("this is the amount in initate transfer" +" "+amount)
+  console.log("========== INITIATE TRANSFER START ==========");
+  console.log("Input parameters:");
+  console.log("- amount (USD):", amount);
+  console.log("- recipientCode:", recipientCode);
+  console.log("- reference:", reference);
+  console.log("- reason:", reason);
+  
   return new Promise((resolve, reject) => {
-    const params = JSON.stringify({
+    // Calculate KES amount
+    const exchangeRate = 125;
+    const amountInKES = amount * exchangeRate;
+    
+    console.log("\nCalculated values:");
+    console.log("- Exchange rate:", exchangeRate);
+    console.log("- Amount in KES:", amountInKES);
+    console.log("- Currency:", "KES");
+    
+    // Prepare request parameters
+    const params = {
       source: "balance",
       reason: reason,
-      amount: amount * 125,
+      amount: amountInKES,
       recipient: recipientCode,
       reference: reference,
-      currency: "KES",
-    });
-
+      currency: "KES"
+    };
+    
+    console.log("\nRequest params being sent to Paystack:");
+    console.log(JSON.stringify(params, null, 2));
+    
+    const stringifiedParams = JSON.stringify(params);
+    console.log("\nStringified params length:", stringifiedParams.length);
+    
+    // Log Paystack API endpoint and headers (without exposing full secret key)
     const options = {
       hostname: "api.paystack.co",
       port: 443,
       path: "/transfer",
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY ? 'SET' : 'MISSING'}`,
         "Content-Type": "application/json",
       },
     };
-
-    makePaystackRequest(options, params)
+    
+    console.log("\nAPI Request details:");
+    console.log("- Hostname:", options.hostname);
+    console.log("- Port:", options.port);
+    console.log("- Path:", options.path);
+    console.log("- Method:", options.method);
+    console.log("- Has API Key:", !!process.env.PAYSTACK_SECRET_KEY);
+    console.log("- API Key length:", process.env.PAYSTACK_SECRET_KEY ? process.env.PAYSTACK_SECRET_KEY.length : 0);
+    console.log("- Content-Type:", options.headers["Content-Type"]);
+    
+    console.log("\nMaking Paystack API call...");
+    const startTime = Date.now();
+    
+    makePaystackRequest(options, stringifiedParams)
       .then((response) => {
+        const endTime = Date.now();
+        const duration = endTime - startTime;
+        
+        console.log("\n========== PAYSTACK RESPONSE RECEIVED ==========");
+        console.log("Response time:", duration, "ms");
+        console.log("Response status:", response.status);
+        console.log("Full response object:");
+        console.log(JSON.stringify(response, null, 2));
+        
         if (response.status) {
+          console.log("\n✅ Transfer initiated successfully!");
+          console.log("Transfer details:");
+          console.log("- Transfer code:", response.data?.transfer_code);
+          console.log("- Reference:", response.data?.reference);
+          console.log("- Amount:", response.data?.amount);
+          console.log("- Currency:", response.data?.currency);
+          console.log("- Status:", response.data?.status);
+          console.log("- Recipient:", response.data?.recipient);
+          console.log("- Created at:", response.data?.createdAt);
+          
+          if (response.data?.domain) console.log("- Domain:", response.data.domain);
+          if (response.data?.source) console.log("- Source:", response.data.source);
+          
+          console.log("\n========== INITIATE TRANSFER END (SUCCESS) ==========");
           resolve(response);
         } else {
-          reject(new Error(response.message));
+          console.log("\n❌ Paystack returned error status!");
+          console.log("Error message:", response.message);
+          console.log("Error type:", response.type);
+          console.log("Error code:", response.code);
+          
+          if (response.errors) {
+            console.log("Detailed errors:");
+            console.log(JSON.stringify(response.errors, null, 2));
+          }
+          
+          // Common error checks
+          if (response.message && response.message.toLowerCase().includes("balance")) {
+            console.log("\n⚠️ BALANCE ISSUE DETECTED!");
+            console.log("Your Paystack wallet may have insufficient funds.");
+            console.log(`Required amount: ${amountInKES} KES`);
+          }
+          
+          if (response.message && response.message.toLowerCase().includes("otp")) {
+            console.log("\n⚠️ OTP REQUIREMENT DETECTED!");
+            console.log("Disable OTP requirement in Paystack Dashboard:");
+            console.log("Settings > Preferences > Transfer Confirmation");
+          }
+          
+          if (response.message && response.message.toLowerCase().includes("business")) {
+            console.log("\n⚠️ BUSINESS TYPE ISSUE DETECTED!");
+            console.log("Your Paystack account must be 'Registered Business' type.");
+            console.log("Check: Settings > Business Details");
+          }
+          
+          console.log("\n========== INITIATE TRANSFER END (FAILURE) ==========");
+          reject(new Error(response.message || "Transfer failed"));
         }
       })
-      .catch(reject);
+      .catch((error) => {
+        console.log("\n========== PAYSTACK REQUEST ERROR ==========");
+        console.log("Error type:", error.name);
+        console.log("Error message:", error.message);
+        console.log("Full error object:", error);
+        
+        if (error.code === 'ENOTFOUND') {
+          console.log("\n⚠️ NETWORK ERROR: Cannot reach Paystack API");
+          console.log("Check your internet connection and DNS settings");
+        }
+        
+        if (error.code === 'ETIMEDOUT') {
+          console.log("\n⚠️ TIMEOUT ERROR: Paystack API not responding");
+          console.log("The request took too long to complete");
+        }
+        
+        if (error.code === 'ECONNREFUSED') {
+          console.log("\n⚠️ CONNECTION REFUSED: Paystack API is unreachable");
+          console.log("Check if Paystack API is accessible from your server");
+        }
+        
+        if (error.response) {
+          console.log("\nHTTP Response error:");
+          console.log("- Status:", error.response.status);
+          console.log("- Headers:", error.response.headers);
+          console.log("- Body:", error.response.body);
+        }
+        
+        console.log("\nStack trace:");
+        console.log(error.stack);
+        
+        console.log("\n========== INITIATE TRANSFER END (EXCEPTION) ==========");
+        reject(error);
+      });
   });
 }
 
