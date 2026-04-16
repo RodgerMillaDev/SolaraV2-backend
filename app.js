@@ -2718,7 +2718,7 @@ function initiateTransfer(amount, recipientCode, reference, reason) {
       amount: amount * 125,
       recipient: recipientCode,
       reference: reference,
-      currency: "USD",
+      currency: "KES",
     });
 
     const options = {
@@ -2793,7 +2793,7 @@ app.post("/process-withdrawal", async (req, res) => {
     const transfer = await initiateTransfer(
       amount,
       recipientCode,
-            withdrawreference,
+      withdrawreference,
       `Withdrawal for ${name || uid}`,
     );
 
