@@ -2718,7 +2718,7 @@ function initiateTransfer(amount, recipientCode, reference, reason) {
       amount: amount * 125,
       recipient: recipientCode,
       reference: reference,
-      currency: "KES",
+      currency: "USD",
     });
 
     const options = {
