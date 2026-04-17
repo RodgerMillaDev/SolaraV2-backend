@@ -2715,7 +2715,7 @@ function initiateTransfer(amount, recipientCode, reference, reason) {
     const params = JSON.stringify({
       source: "balance",
       reason: reason,
-      amount: amount * 125,
+      amount: (amount * 100) * 125,
       recipient: recipientCode,
       reference: reference,
       currency: "KES",
