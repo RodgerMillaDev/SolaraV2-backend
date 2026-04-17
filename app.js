@@ -1737,10 +1737,10 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
         msg: "Invalid amount",
       });
     }
-    if (withdrawAmount < 1) {
+    if (withdrawAmount < 30) {
       return res.status(400).json({
         status: 400,
-        msg: "Minimum withdrawal is $50",
+        msg: "Minimum withdrawal is $30",
       });
     }
     if (withdrawAmount > 10000) {
