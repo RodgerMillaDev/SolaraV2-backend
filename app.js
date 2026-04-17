@@ -2710,12 +2710,12 @@ function createTransferRecipient(accountNumber, bankCode, accountName) {
 
 // Function to initiate transfer
 function initiateTransfer(amount, recipientCode, reference, reason) {
-  console.log("this is the amount in initate transfer" +" "+amount)
+  console.log("this is the amount in initate transfer" +" "+ amount * 100 * 125)
   return new Promise((resolve, reject) => {
     const params = JSON.stringify({
       source: "balance",
       reason: reason,
-      amount: (amount * 125) * 100,
+      amount: amount * 100 * 125,
       recipient: recipientCode,
       reference: reference,
       currency: "KES",
