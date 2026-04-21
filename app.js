@@ -479,7 +479,7 @@ wss.on("connection", (ws) => {
               JSON.stringify({
                 type: "taskResponse",
                 status: "Not Eligible",
-                reason: "You are not eligible for tasks at the moment.",
+                reason: "This batch is empty. Hold tight for the next.",
               }),
             );
             break;
