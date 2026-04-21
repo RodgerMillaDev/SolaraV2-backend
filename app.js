@@ -460,11 +460,15 @@ wss.on("connection", (ws) => {
           const now = Date.now();
 
           // ✅ Determine user level
+        // First code adjusted to match second
           const getUserLevel = (accountPoints) => {
-            if (accountPoints >= 3500) return "Pro";
-            if (accountPoints >= 1000) return "Intermediate";
-            return "Noob";
+            if (accountPoints >= 4000) return "Pro";
+            if (accountPoints >= 2000) return "Master";
+            if (accountPoints >= 1000) return "Journeyman";
+            return "Rookie";
           };
+
+          
 
           const userLevel = getUserLevel(user.accountPoints || 0);
           const isProUser = userLevel === "Pro";
