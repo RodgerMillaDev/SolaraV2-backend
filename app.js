@@ -877,7 +877,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                 const currentPoints = userSnap.data().accountPoints || 0;
 
                 let pointsEarned = 0;
-                if (aiScore >= 96) {
+                if (aiScore >= 98) {
                   const payPercent = aiScore / 100;
                   const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
                   payOut = Math.round(fullPay * payPercent * 100) / 100; // ✅ Rounds to 2 decimals
@@ -1056,7 +1056,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
 
                 let pointsEarned = 0;
 
-                if (aiScore >= 85) {
+                if (aiScore >= 95) {
                   const payPercent = aiScore / 100;
                   const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
                   payOut = Math.round(fullPay * payPercent * 100) / 100; // ✅ Rounds to 2 decimals
@@ -1239,7 +1239,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
 
                 let pointsEarned = 0;
 
-                if (aiScore >= 70) {
+                if (aiScore >= 95) {
                   const payPercent = aiScore / 100;
                   const fullPay = parseFloat(taskSnap.data().pay, 10) || 0;
                   payOut = Math.round(fullPay * payPercent * 100) / 100; // ✅ Rounds to 2 decimals
