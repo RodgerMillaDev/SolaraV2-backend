@@ -456,84 +456,112 @@ wss.on("connection", (ws) => {
             break;
           }
 
-          const user = userSnap.data();
-          const now = Date.now();
+         const user = userSnap.data();
+const now = Date.now();
 
-          // ✅ Determine user level
-        // First code adjusted to match second
-          const getUserLevel = (accountPoints) => {
-            if (accountPoints >= 4000) return "Pro";
-            if (accountPoints >= 2000) return "Master";
-            if (accountPoints >= 1000) return "Journeyman";
-            return "Rookie";
-          };
+// ✅ Function to check if it's a new day
+const isNewDay = (lastCompletionDate) => {
+  if (!lastCompletionDate) return true;
+  
+  let lastDate = lastCompletionDate;
+  if (lastCompletionDate.toDate) {
+    lastDate = lastCompletionDate.toDate();
+  }
+  
+  const currentDate = new Date();
+  return (
+    lastDate.getDate() !== currentDate.getDate() ||
+    lastDate.getMonth() !== currentDate.getMonth() ||
+    lastDate.getFullYear() !== currentDate.getFullYear()
+  );
+};
 
-          
+// ✅ Reset daily task counter if it's a new day
+if (isNewDay(user.lastTaskBatchCompletedAt)) {
+  await userRef.update({
+    dailyTaskTaken: 0
+  });
+  
+  // Refresh user data after reset
+  const refreshedSnap = await userRef.get();
+  const refreshedUser = refreshedSnap.data();
+  user.dailyTaskTaken = refreshedUser.dailyTaskTaken || 0;
+  user.lastTaskBatchCompletedAt = refreshedUser.lastTaskBatchCompletedAt;
+}
 
-          const userLevel = getUserLevel(user.accountPoints || 0);
-          const isProUser = userLevel === "Pro";
+// ✅ Determine user level
+const getUserLevel = (accountPoints) => {
+  if (accountPoints >= 4000) return "Pro";
+  if (accountPoints >= 2000) return "Master";
+  if (accountPoints >= 1000) return "Journeyman";
+  return "Rookie";
+};
 
-          // Set limits based on user level
-          const DAILY_LIMIT = isProUser ? 50 : 30;
-          const COOLDOWN_ENABLED = !isProUser; // Pro users have no cooldown
+const userLevel = getUserLevel(user.accountPoints || 0);
+const isProUser = userLevel === "Pro";
 
-          // ❌ Not eligible
-          if (!user.jobEligibility) {
-            ws.send(
-              JSON.stringify({
-                type: "taskResponse",
-                status: "Not Eligible",
-                reason: "This batch is empty. Hold tight for the next.",
-              }),
-            );
-            break;
-          }
+// Set limits based on user level
+const DAILY_LIMIT = isProUser ? 50 : 30;
+const COOLDOWN_ENABLED = !isProUser; // Pro users have no cooldown
 
-          // ✅ Check if user is in cooldown (skip for Pro users)
-          if (
-            COOLDOWN_ENABLED &&
-            user.taskCooldownUntil &&
-            user.taskCooldownUntil.toMillis() > now
-          ) {
-            const remainingMinutes = Math.ceil(
-              (user.taskCooldownUntil.toMillis() - now) / 60000,
-            );
-            const remainingHours = Math.floor(remainingMinutes / 60);
-            const remainingMins = remainingMinutes % 60;
+// ❌ Not eligible
+if (!user.jobEligibility) {
+  ws.send(
+    JSON.stringify({
+      type: "taskResponse",
+      status: "Not Eligible",
+      reason: "This batch is empty. Hold tight for the next.",
+    }),
+  );
+  break;
+}
 
-            let timeMessage = "";
-            if (remainingHours > 0) {
-              timeMessage = `${remainingHours} hour${remainingHours > 1 ? "s" : ""}`;
-              if (remainingMins > 0)
-                timeMessage += ` and ${remainingMins} minute${remainingMins > 1 ? "s" : ""}`;
-            } else {
-              timeMessage = `${remainingMinutes} minute${remainingMinutes > 1 ? "s" : ""}`;
-            }
+// ✅ Check if user is in cooldown (skip for Pro users)
+if (
+  COOLDOWN_ENABLED &&
+  user.taskCooldownUntil &&
+  user.taskCooldownUntil.toMillis() > now
+) {
+  const remainingMinutes = Math.ceil(
+    (user.taskCooldownUntil.toMillis() - now) / 60000,
+  );
+  const remainingHours = Math.floor(remainingMinutes / 60);
+  const remainingMins = remainingMinutes % 60;
 
-            ws.send(
-              JSON.stringify({
-                type: "taskResponse",
-                status: "Cooldown",
-                reason: `New tasks available in ${timeMessage}. Complete your current tasks first!`,
-                remainingTime: user.taskCooldownUntil.toMillis() - now,
-              }),
-            );
-            break;
-          }
+  let timeMessage = "";
+  if (remainingHours > 0) {
+    timeMessage = `${remainingHours} hour${remainingHours > 1 ? "s" : ""}`;
+    if (remainingMins > 0)
+      timeMessage += ` and ${remainingMins} minute${remainingMins > 1 ? "s" : ""}`;
+  } else {
+    timeMessage = `${remainingMinutes} minute${remainingMinutes > 1 ? "s" : ""}`;
+  }
 
-          // ❌ Daily limit reached (higher for Pro users)
-          if (user.dailyTaskTaken >= DAILY_LIMIT) {
-            ws.send(
-              JSON.stringify({
-                type: "taskResponse",
-                status: "Limit Reached",
-                reason: isProUser
-                  ? "Sorry, you've reached your daily task limit of 50 tasks!"
-                  : "Sorry, you've reached your daily task limit of 30 tasks!",
-              }),
-            );
-            break;
-          }
+  ws.send(
+    JSON.stringify({
+      type: "taskResponse",
+      status: "Cooldown",
+      reason: `New tasks available in ${timeMessage}. Complete your current tasks first!`,
+      remainingTime: user.taskCooldownUntil.toMillis() - now,
+    }),
+  );
+  break;
+}
+
+// ❌ Daily limit reached (higher for Pro users)
+if (user.dailyTaskTaken >= DAILY_LIMIT) {
+  ws.send(
+    JSON.stringify({
+      type: "taskResponse",
+      status: "Limit Reached",
+      reason: isProUser
+        ? "Sorry, you've reached your daily task limit of 50 tasks! Come back tomorrow!"
+        : "Sorry, you've reached your daily task limit of 30 tasks! Come back tomorrow!",
+    }),
+  );
+  break;
+}
+
 
           // ❌ Already working on a task
           if (user.taskID) {
