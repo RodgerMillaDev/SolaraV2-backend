@@ -3096,6 +3096,8 @@ app.post("/reject-withdrawal", async (req, res) => {
       cryptoDetails,
     } = req.body;
 
+    console.log("Rejecting withdrawal:", { withdrawalId, uid, amount });
+
     if (!withdrawalId) {
       return res.status(400).json({
         success: false,
@@ -3123,33 +3125,62 @@ app.post("/reject-withdrawal", async (req, res) => {
         .doc(uid)
         .collection("transactions");
       
-      // Find the pending transaction for this withdrawal
-      const snapshot = await transactionsRef
+      console.log("Looking for transaction with withdrawalId:", withdrawalId);
+      
+      // Try to find by withdrawalId first (regardless of status)
+      let snapshot = await transactionsRef
         .where("withdrawalId", "==", withdrawalId)
-        .where("status", "==", "pending")
         .limit(1)
         .get();
+      
+      // If not found by withdrawalId, try to find by other criteria
+      if (snapshot.empty) {
+        console.log("No transaction found with withdrawalId, trying by amount and timestamp...");
+        
+        // Try to find the most recent pending transaction with same amount
+        snapshot = await transactionsRef
+          .where("type", "==", "withdrawal")
+          .where("status", "in", ["pending", "processing"])
+          .where("amount", "==", amount || 0)
+          .orderBy("createdAt", "desc")
+          .limit(1)
+          .get();
+      }
       
       if (!snapshot.empty) {
         // Update existing transaction
         const transactionDoc = snapshot.docs[0];
+        const transactionData = transactionDoc.data();
+        console.log("Found transaction document:", transactionDoc.id, transactionData);
+        
         await transactionDoc.ref.update({
           status: "rejected",
           rejectionReason: reason || "Rejected by admin",
           rejectedBy: adminName,
           rejectedAt: new Date().toISOString(),
           updatedAt: serverTimestamp(),
+          processedAt: serverTimestamp(),
         });
+        
+        console.log("Successfully updated transaction:", transactionDoc.id);
       } else {
-        // If no pending transaction found (fallback), create one
-        console.log("No pending transaction found for withdrawal:", withdrawalId);
-        const transactionRef = firestore
-          .collection("Users")
-          .doc(uid)
-          .collection("transactions")
-          .doc();
+        // If no transaction found, log all transactions for debugging
+        console.log("No matching transaction found. Listing all withdrawal transactions for user:");
+        
+        const allTransactions = await transactionsRef
+          .where("type", "==", "withdrawal")
+          .get();
+        
+        allTransactions.forEach(doc => {
+          console.log("Transaction:", doc.id, doc.data());
+        });
+        
+        // Create a new transaction record as fallback
+        console.log("Creating new transaction record as fallback for withdrawal:", withdrawalId);
+        const transactionRef = transactionsRef.doc(); // Auto-generate ID
         
         await transactionRef.set({
+          id: transactionRef.id,
           amount: amount || 0,
           type: "withdrawal",
           status: "rejected",
@@ -3161,14 +3192,17 @@ app.post("/reject-withdrawal", async (req, res) => {
           rejectedBy: adminName,
           rejectedAt: new Date().toISOString(),
           createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         });
+        
+        console.log("Created new transaction document as fallback:", transactionRef.id);
       }
     }
 
-    // send email 
-const emailUser = email;
-const subject = "Withdrawal Request Update - Solara Jobs";
-const body = `
+    // Send email notification
+    const emailUser = email;
+    const subject = "Withdrawal Request Update - Solara Jobs";
+    const body = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -3188,7 +3222,8 @@ const body = `
               <img src="https://solara-ver2.web.app/static/media/favIcon.8db8a902a3252e8211b5.png" alt="Solara Jobs" style="height: 50px; width: auto; max-width: 200px;">
               <div style="font-size: 20px; color: #ffffff; margin-top: 10px; letter-spacing: -1px;">Solara Jobs</div>
              </td>
-           </tr>
+            </td>
+          </tr>
           
           <!-- Main Content -->
           <tr>
@@ -3201,6 +3236,7 @@ const body = `
               <!-- Status Badge -->
               <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 16px 20px; margin-bottom: 24px; border-radius: 0px;">
                 <p style="margin: 0; color: #991b1b; font-weight: 500;">Request Status: <strong>Declined</strong></p>
+                ${reason ? `<p style="margin: 8px 0 0; color: #991b1b; font-size: 14px;">Reason: ${reason}</p>` : ''}
               </div>
               
               <!-- Withdrawal Details -->
@@ -3215,16 +3251,14 @@ const body = `
                     <td style="padding: 8px 0; color: #64748b;">Amount:</td>
                     <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">$${amount} USD</td>
                   </tr>
-                </table>
+                 </table>
               </div>
               
-           
-              
-              <!-- What You Can Do -->
+              <!-- Next Steps -->
               <div style="margin-bottom: 24px;">
                 <p style="font-weight: 600; color: #1a1a1a; margin-bottom: 12px;">Next Steps</p>
                 <ul style="margin: 0; padding-left: 20px; color: #555555; line-height: 1.6;">
-                  <li style="margin-bottom: 8px;">Make the necessary adjustments or corrections</li>
+                  <li style="margin-bottom: 8px;">Verify your payment details are correct</li>
                   <li style="margin-bottom: 8px;">Submit a new withdrawal request once resolved</li>
                   <li style="margin-bottom: 8px;">Contact support if you need clarification</li>
                 </ul>
@@ -3244,7 +3278,7 @@ const body = `
                 We appreciate your patience.
               </p>
               
-            </td>
+             </td>
            </tr>
           
           <!-- Footer -->
@@ -3256,20 +3290,18 @@ const body = `
               <p style="margin: 0; font-size: 11px; color: #adb5bd;">
                 This is an automated message, please do not reply directly to this email.
               </p>
-            </td>
-          </tr>
+             </td>
+           </tr>
           
         </table>
-      </td>
-    </table>
-  </table>
+       </td>
+     </tr>
+   </table>
 </body>
 </html>
 `;
 
-sendEmail(emailUser, subject, body);
-
-
+    sendEmail(emailUser, subject, body);
 
     res.status(200).json({
       success: true,
