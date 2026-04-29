@@ -3096,8 +3096,6 @@ app.post("/reject-withdrawal", async (req, res) => {
       cryptoDetails,
     } = req.body;
 
-    console.log("Rejecting withdrawal:", { withdrawalId, uid, amount });
-
     if (!withdrawalId) {
       return res.status(400).json({
         success: false,
@@ -3117,187 +3115,61 @@ app.post("/reject-withdrawal", async (req, res) => {
       rejectionReason: reason || "Rejected by admin",
       rejectedAtTimestamp: serverTimestamp(),
     });
+// UPDATE existing transaction record instead of creating new one
+if (uid) {
+  // Use the withdrawalId as the document ID directly
+  const transactionRef = firestore
+    .collection("Users")
+    .doc(uid)
+    .collection("transactions")
+    .doc(withdrawalId); // Direct access using withdrawalId as document ID
+  
+  const transactionDoc = await transactionRef.get();
+  
+  if (transactionDoc.exists) {
+    // Update existing transaction
+    const transactionData = transactionDoc.data();
+    console.log("Found transaction document:", withdrawalId, transactionData);
+    
+    await transactionRef.update({
+      status: "rejected",
+      rejectionReason: reason || "Rejected by admin",
+      rejectedBy: adminName,
+      rejectedAt: new Date().toISOString(),
+      updatedAt: serverTimestamp(),
+      processedAt: serverTimestamp(),
+    });
+    
+    console.log("Successfully updated transaction:", withdrawalId);
+  } else {
+    // If no transaction found with this ID, create one
+    console.log("No transaction found with ID:", withdrawalId, "- Creating new one");
+    
+    await transactionRef.set({
+      id: withdrawalId,
+      amount: Number(amount) || 0,
+      type: "withdrawal",
+      status: "rejected",
+      withdrawMethod: withdrawMethod || "Bank Transfer",
+      bankDetails: bankDetails || {},
+      cryptoDetails: cryptoDetails || {},
+      withdrawalId: withdrawalId,
+      rejectionReason: reason || "Rejected by admin",
+      rejectedBy: adminName,
+      rejectedAt: new Date().toISOString(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      processedAt: serverTimestamp(),
+    });
+    
+    console.log("Created new transaction document:", withdrawalId);
+  }
+}
 
-    // UPDATE existing transaction record instead of creating new one
-    if (uid) {
-      const transactionsRef = firestore
-        .collection("Users")
-        .doc(uid)
-        .collection("transactions");
-      
-      console.log("Looking for transaction with withdrawalId:", withdrawalId);
-      
-      // FIRST: Try multiple query strategies
-      let transactionDoc = null;
-      
-      // Strategy 1: Try by withdrawalId field
-      let snapshot = await transactionsRef
-        .where("withdrawalId", "==", withdrawalId)
-        .limit(1)
-        .get();
-      
-      if (!snapshot.empty) {
-        transactionDoc = snapshot.docs[0];
-        console.log("Found by withdrawalId field");
-      }
-      
-      // Strategy 2: Try by requestId field (if you used that naming)
-      if (!transactionDoc) {
-        console.log("Trying by requestId field...");
-        snapshot = await transactionsRef
-          .where("requestId", "==", withdrawalId)
-          .limit(1)
-          .get();
-        
-        if (!snapshot.empty) {
-          transactionDoc = snapshot.docs[0];
-          console.log("Found by requestId field");
-        }
-      }
-      
-      // Strategy 3: Try by id field matching withdrawalId
-      if (!transactionDoc) {
-        console.log("Trying by id field...");
-        snapshot = await transactionsRef
-          .where("id", "==", withdrawalId)
-          .limit(1)
-          .get();
-        
-        if (!snapshot.empty) {
-          transactionDoc = snapshot.docs[0];
-          console.log("Found by id field");
-        }
-      }
-      
-      // Strategy 4: Find by amount and pending status (most reliable if withdrawalId not stored)
-      if (!transactionDoc) {
-        console.log("No transaction found with ID fields. Trying by amount and status...");
-        
-        // Get all pending withdrawals for this user
-        snapshot = await transactionsRef
-          .where("type", "==", "withdrawal")
-          .where("status", "==", "pending")
-          .orderBy("createdAt", "desc")
-          .limit(5)
-          .get();
-        
-        console.log(`Found ${snapshot.size} pending withdrawals`);
-        
-        // Look for matching amount (most recent one with same amount)
-        for (const doc of snapshot.docs) {
-          const data = doc.data();
-          console.log("Checking transaction:", doc.id, { 
-            amount: data.amount, 
-            requestAmount: amount,
-            createdAt: data.createdAt 
-          });
-          
-          // Check if amounts match (convert both to numbers)
-          if (Number(data.amount) === Number(amount)) {
-            transactionDoc = doc;
-            console.log("Found matching transaction by amount:", doc.id);
-            break;
-          }
-        }
-      }
-      
-      // Strategy 5: Get the most recent pending withdrawal regardless of amount
-      if (!transactionDoc) {
-        console.log("Trying to get most recent pending withdrawal");
-        snapshot = await transactionsRef
-          .where("type", "==", "withdrawal")
-          .where("status", "==", "pending")
-          .limit(1)
-          .get();
-        
-        if (!snapshot.empty) {
-          transactionDoc = snapshot.docs[0];
-          console.log("Using most recent pending withdrawal:", transactionDoc.id);
-        }
-      }
-      
-      if (transactionDoc) {
-        // Update existing transaction
-        const transactionData = transactionDoc.data();
-        console.log("Found transaction document:", transactionDoc.id, transactionData);
-        
-        // Preserve the original withdrawalId if it exists, otherwise add it
-        const updateData = {
-          status: "rejected",
-          rejectionReason: reason || "Rejected by admin",
-          rejectedBy: adminName,
-          rejectedAt: new Date().toISOString(),
-          updatedAt: serverTimestamp(),
-          processedAt: serverTimestamp(),
-        };
-        
-        // If the transaction doesn't have withdrawalId, add it now
-        if (!transactionData.withdrawalId && !transactionData.requestId) {
-          updateData.withdrawalId = withdrawalId;
-          console.log("Adding missing withdrawalId to transaction");
-        }
-        
-        await transactionDoc.ref.update(updateData);
-        console.log("Successfully updated transaction:", transactionDoc.id);
-      } else {
-        // If no transaction found, log all transactions for debugging
-        console.log("==========================================");
-        console.log("NO MATCHING TRANSACTION FOUND!");
-        console.log("Search criteria:", { withdrawalId, amount, uid });
-        console.log("Listing ALL withdrawal transactions for user:");
-        
-        const allTransactions = await transactionsRef
-          .where("type", "==", "withdrawal")
-          .get();
-        
-        if (allTransactions.empty) {
-          console.log("No withdrawal transactions found at all for this user");
-        } else {
-          console.log(`Found ${allTransactions.size} total withdrawal transactions:`);
-          allTransactions.forEach(doc => {
-            const data = doc.data();
-            console.log("Transaction:", {
-              docId: doc.id,
-              id: data.id,
-              withdrawalId: data.withdrawalId,
-              requestId: data.requestId,
-              amount: data.amount,
-              status: data.status,
-              createdAt: data.createdAt?.toDate?.() || data.createdAt
-            });
-          });
-        }
-        console.log("==========================================");
-        
-        // Create a new transaction record as last resort
-        console.log("Creating new transaction record as fallback for withdrawal:", withdrawalId);
-        const transactionRef = transactionsRef.doc();
-        
-        await transactionRef.set({
-          id: transactionRef.id,
-          withdrawalId: withdrawalId, // Store it properly this time
-          amount: Number(amount) || 0,
-          type: "withdrawal",
-          status: "rejected",
-          withdrawMethod: withdrawMethod || "Bank Transfer",
-          bankDetails: bankDetails || {},
-          cryptoDetails: cryptoDetails || {},
-          rejectionReason: reason || "Rejected by admin",
-          rejectedBy: adminName,
-          rejectedAt: new Date().toISOString(),
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          processedAt: serverTimestamp(),
-        });
-        
-        console.log("Created new transaction document as fallback:", transactionRef.id);
-      }
-    }
-
-    // Send email notification
-    const emailUser = email;
-    const subject = "Withdrawal Request Update - Solara Jobs";
-    const body = `
+    // send email 
+const emailUser = email;
+const subject = "Withdrawal Request Update - Solara Jobs";
+const body = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -3317,8 +3189,7 @@ app.post("/reject-withdrawal", async (req, res) => {
               <img src="https://solara-ver2.web.app/static/media/favIcon.8db8a902a3252e8211b5.png" alt="Solara Jobs" style="height: 50px; width: auto; max-width: 200px;">
               <div style="font-size: 20px; color: #ffffff; margin-top: 10px; letter-spacing: -1px;">Solara Jobs</div>
              </td>
-            </td>
-          </tr>
+           </tr>
           
           <!-- Main Content -->
           <tr>
@@ -3331,7 +3202,6 @@ app.post("/reject-withdrawal", async (req, res) => {
               <!-- Status Badge -->
               <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 16px 20px; margin-bottom: 24px; border-radius: 0px;">
                 <p style="margin: 0; color: #991b1b; font-weight: 500;">Request Status: <strong>Declined</strong></p>
-                ${reason ? `<p style="margin: 8px 0 0; color: #991b1b; font-size: 14px;">Reason: ${reason}</p>` : ''}
               </div>
               
               <!-- Withdrawal Details -->
@@ -3346,14 +3216,16 @@ app.post("/reject-withdrawal", async (req, res) => {
                     <td style="padding: 8px 0; color: #64748b;">Amount:</td>
                     <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">$${amount} USD</td>
                   </tr>
-                 </table>
+                </table>
               </div>
               
-              <!-- Next Steps -->
+           
+              
+              <!-- What You Can Do -->
               <div style="margin-bottom: 24px;">
                 <p style="font-weight: 600; color: #1a1a1a; margin-bottom: 12px;">Next Steps</p>
                 <ul style="margin: 0; padding-left: 20px; color: #555555; line-height: 1.6;">
-                  <li style="margin-bottom: 8px;">Verify your payment details are correct</li>
+                  <li style="margin-bottom: 8px;">Make the necessary adjustments or corrections</li>
                   <li style="margin-bottom: 8px;">Submit a new withdrawal request once resolved</li>
                   <li style="margin-bottom: 8px;">Contact support if you need clarification</li>
                 </ul>
@@ -3373,7 +3245,7 @@ app.post("/reject-withdrawal", async (req, res) => {
                 We appreciate your patience.
               </p>
               
-             </td>
+            </td>
            </tr>
           
           <!-- Footer -->
@@ -3385,18 +3257,20 @@ app.post("/reject-withdrawal", async (req, res) => {
               <p style="margin: 0; font-size: 11px; color: #adb5bd;">
                 This is an automated message, please do not reply directly to this email.
               </p>
-             </td>
-           </tr>
+            </td>
+          </tr>
           
         </table>
-       </td>
-     </tr>
-   </table>
+      </td>
+    </table>
+  </table>
 </body>
 </html>
 `;
 
-    sendEmail(emailUser, subject, body);
+sendEmail(emailUser, subject, body);
+
+
 
     res.status(200).json({
       success: true,
