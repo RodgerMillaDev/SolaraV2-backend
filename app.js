@@ -3127,72 +3127,168 @@ app.post("/reject-withdrawal", async (req, res) => {
       
       console.log("Looking for transaction with withdrawalId:", withdrawalId);
       
-      // Try to find by withdrawalId first (regardless of status)
+      // FIRST: Try multiple query strategies
+      let transactionDoc = null;
+      
+      // Strategy 1: Try by withdrawalId field
       let snapshot = await transactionsRef
         .where("withdrawalId", "==", withdrawalId)
         .limit(1)
         .get();
       
-      // If not found by withdrawalId, try to find by other criteria
-      if (snapshot.empty) {
-        console.log("No transaction found with withdrawalId, trying by amount and timestamp...");
+      if (!snapshot.empty) {
+        transactionDoc = snapshot.docs[0];
+        console.log("Found by withdrawalId field");
+      }
+      
+      // Strategy 2: Try by requestId field (if you used that naming)
+      if (!transactionDoc) {
+        console.log("Trying by requestId field...");
+        snapshot = await transactionsRef
+          .where("requestId", "==", withdrawalId)
+          .limit(1)
+          .get();
         
-        // Try to find the most recent pending transaction with same amount
+        if (!snapshot.empty) {
+          transactionDoc = snapshot.docs[0];
+          console.log("Found by requestId field");
+        }
+      }
+      
+      // Strategy 3: Try by id field matching withdrawalId
+      if (!transactionDoc) {
+        console.log("Trying by id field...");
+        snapshot = await transactionsRef
+          .where("id", "==", withdrawalId)
+          .limit(1)
+          .get();
+        
+        if (!snapshot.empty) {
+          transactionDoc = snapshot.docs[0];
+          console.log("Found by id field");
+        }
+      }
+      
+      // Strategy 4: Find by amount and pending status (most reliable if withdrawalId not stored)
+      if (!transactionDoc) {
+        console.log("No transaction found with ID fields. Trying by amount and status...");
+        
+        // Get all pending withdrawals for this user
         snapshot = await transactionsRef
           .where("type", "==", "withdrawal")
-          .where("status", "in", ["pending", "processing"])
-          .where("amount", "==", amount || 0)
+          .where("status", "==", "pending")
+          .orderBy("createdAt", "desc")
+          .limit(5)
+          .get();
+        
+        console.log(`Found ${snapshot.size} pending withdrawals`);
+        
+        // Look for matching amount (most recent one with same amount)
+        for (const doc of snapshot.docs) {
+          const data = doc.data();
+          console.log("Checking transaction:", doc.id, { 
+            amount: data.amount, 
+            requestAmount: amount,
+            createdAt: data.createdAt 
+          });
+          
+          // Check if amounts match (convert both to numbers)
+          if (Number(data.amount) === Number(amount)) {
+            transactionDoc = doc;
+            console.log("Found matching transaction by amount:", doc.id);
+            break;
+          }
+        }
+      }
+      
+      // Strategy 5: Get the most recent pending withdrawal regardless of amount
+      if (!transactionDoc) {
+        console.log("Trying to get most recent pending withdrawal");
+        snapshot = await transactionsRef
+          .where("type", "==", "withdrawal")
+          .where("status", "==", "pending")
           .orderBy("createdAt", "desc")
           .limit(1)
           .get();
+        
+        if (!snapshot.empty) {
+          transactionDoc = snapshot.docs[0];
+          console.log("Using most recent pending withdrawal:", transactionDoc.id);
+        }
       }
       
-      if (!snapshot.empty) {
+      if (transactionDoc) {
         // Update existing transaction
-        const transactionDoc = snapshot.docs[0];
         const transactionData = transactionDoc.data();
         console.log("Found transaction document:", transactionDoc.id, transactionData);
         
-        await transactionDoc.ref.update({
+        // Preserve the original withdrawalId if it exists, otherwise add it
+        const updateData = {
           status: "rejected",
           rejectionReason: reason || "Rejected by admin",
           rejectedBy: adminName,
           rejectedAt: new Date().toISOString(),
           updatedAt: serverTimestamp(),
           processedAt: serverTimestamp(),
-        });
+        };
         
+        // If the transaction doesn't have withdrawalId, add it now
+        if (!transactionData.withdrawalId && !transactionData.requestId) {
+          updateData.withdrawalId = withdrawalId;
+          console.log("Adding missing withdrawalId to transaction");
+        }
+        
+        await transactionDoc.ref.update(updateData);
         console.log("Successfully updated transaction:", transactionDoc.id);
       } else {
         // If no transaction found, log all transactions for debugging
-        console.log("No matching transaction found. Listing all withdrawal transactions for user:");
+        console.log("==========================================");
+        console.log("NO MATCHING TRANSACTION FOUND!");
+        console.log("Search criteria:", { withdrawalId, amount, uid });
+        console.log("Listing ALL withdrawal transactions for user:");
         
         const allTransactions = await transactionsRef
           .where("type", "==", "withdrawal")
           .get();
         
-        allTransactions.forEach(doc => {
-          console.log("Transaction:", doc.id, doc.data());
-        });
+        if (allTransactions.empty) {
+          console.log("No withdrawal transactions found at all for this user");
+        } else {
+          console.log(`Found ${allTransactions.size} total withdrawal transactions:`);
+          allTransactions.forEach(doc => {
+            const data = doc.data();
+            console.log("Transaction:", {
+              docId: doc.id,
+              id: data.id,
+              withdrawalId: data.withdrawalId,
+              requestId: data.requestId,
+              amount: data.amount,
+              status: data.status,
+              createdAt: data.createdAt?.toDate?.() || data.createdAt
+            });
+          });
+        }
+        console.log("==========================================");
         
-        // Create a new transaction record as fallback
+        // Create a new transaction record as last resort
         console.log("Creating new transaction record as fallback for withdrawal:", withdrawalId);
-        const transactionRef = transactionsRef.doc(); // Auto-generate ID
+        const transactionRef = transactionsRef.doc();
         
         await transactionRef.set({
           id: transactionRef.id,
-          amount: amount || 0,
+          withdrawalId: withdrawalId, // Store it properly this time
+          amount: Number(amount) || 0,
           type: "withdrawal",
           status: "rejected",
           withdrawMethod: withdrawMethod || "Bank Transfer",
           bankDetails: bankDetails || {},
           cryptoDetails: cryptoDetails || {},
-          withdrawalId: withdrawalId,
           rejectionReason: reason || "Rejected by admin",
           rejectedBy: adminName,
           rejectedAt: new Date().toISOString(),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
+          processedAt: serverTimestamp(),
         });
         
         console.log("Created new transaction document as fallback:", transactionRef.id);
