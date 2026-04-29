@@ -3207,7 +3207,6 @@ app.post("/reject-withdrawal", async (req, res) => {
         snapshot = await transactionsRef
           .where("type", "==", "withdrawal")
           .where("status", "==", "pending")
-          .orderBy("createdAt", "desc")
           .limit(1)
           .get();
         
