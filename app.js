@@ -608,7 +608,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
             ];
           }
 
-          const BATCH_SIZE = isProUser ? 15 : 10; // Pro users get 15 tasks per batch
+          const BATCH_SIZE = isProUser ? 12 : 6; // Pro users get 15 tasks per batch
           const tasksToAssign = availableTasks.slice(0, BATCH_SIZE);
 
           let assignedTasks = [];
