@@ -886,7 +886,8 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                   status = "Completed";
 
                   // 🎯 POINTS LOGIC
-                  pointsEarned = Math.floor(aiScore / 10); // e.g. 85 → 8 points
+                  // pointsEarned = Math.floor(aiScore / 10); // e.g. 85 → 8 points
+                  pointsEarned = 0.25; 
 
                   tx.update(taskRef, {
                     aiScore,
@@ -1063,7 +1064,9 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                   rewarded = true;
                   status = "Completed";
                   // 🎯 POINTS LOGIC
-                  pointsEarned = Math.floor(aiScore / 10);
+                  // pointsEarned = Math.floor(aiScore / 10);
+                                    pointsEarned = 0.25; 
+
 
                   tx.update(taskRef, {
                     aiScore,
@@ -1247,7 +1250,9 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                   status = "Completed";
 
                   // 🎯 POINTS LOGIC
-                  pointsEarned = Math.floor(aiScore / 10);
+                  // pointsEarned = Math.floor(aiScore / 10);
+                                    pointsEarned = 0.25; 
+
 
                   tx.update(taskRef, {
                     aiScore,
