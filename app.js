@@ -1863,8 +1863,8 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
 
     await transactionRef.set({
       amountUSD: withdrawAmount, // Changed from 'amount' to 'amountUSD' to match process-withdrawal
-      amountKES: withdrawAmount * 121, // Add this for consistency
-      exchangeRate: 121, // Add exchange rate
+      amountKES: withdrawAmount * 125, // Add this for consistency
+      exchangeRate: 125, // Add exchange rate
       bankDetails,
       cryptoDetails,
       withdrawMethod,
@@ -2747,12 +2747,12 @@ function createTransferRecipient(accountNumber, bankCode, accountName) {
 
 // Function to initiate transfer
 function initiateTransfer(amount, recipientCode, reference, reason) {
-  console.log("this is the amount in initate transfer" +" "+ amount * 100 * 121)
+  console.log("this is the amount in initate transfer" +" "+ amount * 100 * 125)
   return new Promise((resolve, reject) => {
     const params = JSON.stringify({
       source: "balance",
       reason: reason,
-      amount: amount * 100 * 121,
+      amount: amount * 100 * 125,
       recipient: recipientCode,
       reference: reference,
       currency: "KES",
@@ -2835,7 +2835,7 @@ app.post("/process-withdrawal", async (req, res) => {
     );
 
     // Calculate KES amount for records
-    const amountInKES = amount * 121;
+    const amountInKES = amount * 125;
 
     // Step 4: Update withdrawal request with success
     await withdrawalRef.update({
@@ -2846,7 +2846,7 @@ app.post("/process-withdrawal", async (req, res) => {
       recipientCode: recipientCode,
       amountUSD: amount,
       amountKES: amountInKES,
-      exchangeRate: 121,
+      exchangeRate: 125,
       transferDetails: {
         amountUSD: amount,
         amountKES: amountInKES,
@@ -2867,7 +2867,7 @@ await transactionRef.update({
   status: "completed",
   amountUSD: amount,
   amountKES: amountInKES,
-  exchangeRate: 121,
+  exchangeRate: 125,
   currency: "USD",
   type: "withdrawal",
   withdrawMethod: withdrawMethod,
@@ -2936,7 +2936,7 @@ await transactionRef.update({
               <div style="background-color: #f3f4f6; padding: 20px; margin-bottom: 24px; border-radius: 8px; text-align: center;">
                 <p style="margin: 0 0 8px; font-size: 14px; color: #6b7280; font-weight: 500;">AMOUNT DISBURSED</p>
                 <p style="margin: 0; font-size: 36px; font-weight: bold; color: #5a00c0;">$${amount} USD</p>
-                <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280;">≈ ${amountInKES.toLocaleString()} KES (Exchange rate: 1 USD = 121 KES)</p>
+                <p style="margin: 8px 0 0; font-size: 12px; color: #6b7280;">≈ ${amountInKES.toLocaleString()} KES (Exchange rate: 1 USD = 125 KES)</p>
               </div>
               
               <!-- Bank Details -->
