@@ -1949,7 +1949,7 @@ app.post("/withdrawRequest", upload.none(), async (req, res) => {
               <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px; text-align: center;">
                 <p style="margin: 0 0 8px; font-weight: 600; color: #1e293b;">Need assistance?</p>
                 <p style="margin: 0; color: #64748b; font-size: 14px;">
-                  Contact our support team at <a href="mailto:support@solarajobs.com" style="color: #5a00c0; text-decoration: none;">support@solarajobs.com</a>
+                  Contact our support team at <a href="mailto:admin@solarajobs.com" style="color: #5a00c0; text-decoration: none;">admin@solarajobs.com</a>
                 </p>
               </div>
               
@@ -2609,7 +2609,7 @@ app.post("/apply-job", upload.single("cv"), async (req, res) => {
               <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px; text-align: center;">
                 <p style="margin: 0 0 8px; font-weight: 600; color: #1e293b;">Have questions about your application?</p>
                 <p style="margin: 0; color: #64748b; font-size: 14px;">
-                  Contact our support team at <a href="mailto:support@solarajobs.com" style="color: #5a00c0; text-decoration: none;">support@solarajobs.com</a>
+                  Contact our support team at <a href="mailto:admin@solarajobs.com" style="color: #5a00c0; text-decoration: none;">admin@solarajobs.com</a>
                 </p>
               </div>
               
@@ -2973,7 +2973,7 @@ await transactionRef.update({
               <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px; text-align: center;">
                 <p style="margin: 0 0 8px; font-weight: 600; color: #1e293b;">Need assistance?</p>
                 <p style="margin: 0; color: #64748b; font-size: 14px;">
-                  If you don't receive the amount within 3 business days, contact our support team at <a href="mailto:support@solarajobs.com" style="color: #5a00c0; text-decoration: none;">support@solarajobs.com</a>
+                  If you don't receive the amount within 3 business days, contact our support team at <a href="mailto:admin@solarajobs.com" style="color: #5a00c0; text-decoration: none;">admin@solarajobs.com</a>
                 </p>
               </div>
               
@@ -3240,7 +3240,7 @@ const body = `
               <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px; text-align: center;">
                 <p style="margin: 0 0 8px; font-weight: 600; color: #1e293b;">Need assistance?</p>
                 <p style="margin: 0; color: #64748b; font-size: 14px;">
-                  Contact our support team at <a href="mailto:support@solarajobs.com" style="color: #5a00c0; text-decoration: none;">support@solarajobs.com</a>
+                  Contact our support team at <a href="mailto:admin@solarajobs.com" style="color: #5a00c0; text-decoration: none;">admin@solarajobs.com</a>
                 </p>
               </div>
               
@@ -3465,7 +3465,7 @@ const body = `
               <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px; text-align: center;">
                 <p style="margin: 0 0 8px; font-weight: 600; color: #1e293b;">Need assistance?</p>
                 <p style="margin: 0; color: #64748b; font-size: 14px;">
-                  If you don't receive the crypto within 2 hours, contact our support team at <a href="mailto:support@solarajobs.com" style="color: #5a00c0; text-decoration: none;">support@solarajobs.com</a>
+                  If you don't receive the crypto within 2 hours, contact our support team at <a href="mailto:admin@solarajobs.com" style="color: #5a00c0; text-decoration: none;">admin@solarajobs.com</a>
                 </p>
               </div>
               
@@ -3666,4 +3666,139 @@ async function sendEmail( emailUser, subject, body) {
   }
 };
 
+// Account Disable/Suspension Endpoint (matches your sendDisableEmail function)
+app.post("/accountTermination", async (req, res) => {
+  const { userName, userEmail } = req.body;
 
+  // Validation
+  if (!userEmail || !userName) {
+    return res.status(400).json({
+      success: false,
+      message: "Email and name are required"
+    });
+  }
+
+  const subject = "Account Suspension Notice - Solara Jobs";
+
+  const htmlBody = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account Suspension - Solara Jobs</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f5f5f5;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f5f5f5; padding: 40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); overflow: hidden;">
+          
+          <!-- Header -->
+          <tr>
+            <td style="padding: 32px 40px 24px; text-align: center; background: linear-gradient(135deg, #0d0a22 0%, #1a0e69 100%);">
+              <img src="https://solara-ver2.web.app/static/media/favIcon.8db8a902a3252e8211b5.png" alt="Solara Jobs" style="height: 50px; width: auto; max-width: 200px;">
+              <div style="font-size: 20px; color: #ffffff; margin-top: 10px; letter-spacing: -1px;">Solara Jobs</div>
+            </td>
+           </td>
+          
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 40px;">
+              
+              <!-- Greeting -->
+              <h2 style="margin: 0 0 8px; font-size: 24px; color: #5a00c0;">Dear ${userName},</h2>
+              <p style="margin: 0 0 24px; color: #555555; font-size: 16px; line-height: 1.5;">We are writing to inform you that your Solara Jobs account has been disabled.</p>
+              
+              <!-- Disable Badge -->
+              <div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 16px 20px; margin-bottom: 24px; border-radius: 0px;">
+                <p style="margin: 0; color: #991b1b; font-weight: 500;">Account Status: <strong>Disabled</strong></p>
+              </div>
+              
+              <!-- Account Details -->
+              <div style="background-color: #f3f4f6; padding: 20px; margin-bottom: 24px; border-radius: 8px;">
+                <p style="margin: 0 0 16px; font-weight: 600; color: #1e293b; font-size: 16px;">Account Information</p>
+                <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size: 14px;">
+                  <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 8px 0; color: #64748b; width: 140px;">Email Address:</td>
+                    <td style="padding: 8px 0; color: #1e293b; font-weight: 500;">${userEmail}</td>
+                  </tr>
+                </table>
+              </div>
+              
+              <!-- Reasons for Disable -->
+              <div style="margin-bottom: 24px;">
+                <p style="font-weight: 600; color: #1a1a1a; margin-bottom: 12px;">Your account on Solara has been disabled due to one or more of the following reasons:</p>
+                <ul style="margin: 0; padding-left: 20px; color: #555555; line-height: 1.6;">
+                  <li style="margin-bottom: 8px;">Poor performance or consistently low-quality work</li>
+                  <li style="margin-bottom: 8px;">Violation of platform rules or terms of service</li>
+                  <li style="margin-bottom: 8px;">Detection of suspicious or fraudulent activities</li>
+                  <li style="margin-bottom: 8px;">Abuse of task systems or payment manipulation</li>
+                  <li style="margin-bottom: 8px;">Violation of community conduct guidelines</li>
+                </ul>
+              </div>
+              
+              <!-- Reactivation Information -->
+              <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px; font-weight: 600; color: #1e293b;">Account Reactivation</p>
+                <p style="margin: 0; color: #64748b; font-size: 14px;">
+                  If you believe this action was taken in error or wish to appeal, please contact our support team at <a href="mailto:admin@solarajobs.com" style="color: #5a00c0; text-decoration: none;">admin@solarajobs.com</a>
+                </p>
+              </div>
+              
+              <!-- Thank You -->
+              <p style="margin: 24px 0 0; color: #555555; text-align: center; font-size: 14px;">
+                Thank you for your understanding.
+              </p>
+              
+            </td>
+           </td>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8f9fa; padding: 24px 40px; text-align: center; border-top: 1px solid #e9ecef;">
+              <p style="margin: 0 0 12px; font-size: 12px; color: #6c757d;">
+                Solara Jobs | Professional Workforce Solutions
+              </p>
+              <p style="margin: 0; font-size: 11px; color: #adb5bd;">
+                This is an automated message regarding your account status.
+              </p>
+              <p style="margin: 12px 0 0; font-size: 11px; color: #adb5bd;">
+                © ${new Date().getFullYear()} Solara Jobs. All rights reserved.
+              </p>
+            </td>
+          </tr>
+          
+        </table>
+      </td>
+    </td>
+  </table>
+</body>
+</html>
+  `;
+
+  try {
+    // Send email using nodemailer transporter
+    await transporter.sendMail({
+      from: `"Solara Jobs" <${process.env.EM_USER}>`,
+      to: userEmail,
+      subject: subject,
+      html: htmlBody
+    });
+
+    console.log(`✅ Account disable notification sent to ${userEmail}`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Account disable notification sent successfully"
+    });
+
+  } catch (error) {
+    console.error("❌ Account disable email error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send account disable notification"
+    });
+  }
+});
