@@ -3667,7 +3667,7 @@ async function sendEmail( emailUser, subject, body) {
 };
 
 // Account Disable/Suspension Endpoint (matches your sendDisableEmail function)
-app.post("/accountTermination", async (req, res) => {
+app.post("/accountTermination", upload.none(), async (req, res) => {
   const { userName, userEmail } = req.body;
 
   // Validation
