@@ -972,7 +972,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                         payOut, // ✅ USE payOut (not cash)
                         rewarded,
                         status,
-                        completeMethod: "Submitted",
+                        completeMethod: "Completed",
                         cooldown: cooldownInfo, // ✅ SEND cooldown info
                       }),
                     );
@@ -1150,7 +1150,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                       payOut, // ✅ USE payOut
                       rewarded,
                       status,
-                      completeMethod: "Submitted",
+                      completeMethod: "Completed",
                       cooldown: cooldownInfo,
                     }),
                   );
@@ -1336,7 +1336,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                       payOut, // ✅ USE payOut
                       rewarded,
                       status,
-                      completeMethod: "Submitted",
+                      completeMethod: "Completed",
                       cooldown: cooldownInfo,
                     }),
                   );
