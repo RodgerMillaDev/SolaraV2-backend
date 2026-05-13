@@ -311,6 +311,7 @@ const startTaskTimer = ({ ws, userId, taskId, duration, startedAt }) => {
               JSON.stringify({
                 type: "taskComplete",
                 taskId,
+                aiScore:0,
                 completeMethod: "Timed-out",
                 payOut: 0,
               }),
@@ -971,7 +972,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                         payOut, // ✅ USE payOut (not cash)
                         rewarded,
                         status,
-                        completeMethod: "Instant",
+                        completeMethod: "Submitted",
                         cooldown: cooldownInfo, // ✅ SEND cooldown info
                       }),
                     );
@@ -1149,7 +1150,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                       payOut, // ✅ USE payOut
                       rewarded,
                       status,
-                      completeMethod: "Instant",
+                      completeMethod: "Submitted",
                       cooldown: cooldownInfo,
                     }),
                   );
@@ -1335,7 +1336,7 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
                       payOut, // ✅ USE payOut
                       rewarded,
                       status,
-                      completeMethod: "Instant",
+                      completeMethod: "Submitted",
                       cooldown: cooldownInfo,
                     }),
                   );
@@ -3643,8 +3644,6 @@ const transporter = nodemailer.createTransport({
     servername: process.env.HAK,
   },
 });
-
-
 async function sendEmail( emailUser, subject, body) {
   
   try {
@@ -3665,7 +3664,6 @@ async function sendEmail( emailUser, subject, body) {
    
   }
 };
-
 // Account Disable/Suspension Endpoint (matches your sendDisableEmail function)
 app.post("/accountTermination", upload.none(), async (req, res) => {
   const { userName, userEmail } = req.body;
