@@ -242,6 +242,8 @@ const startScreeningTimer = ({ ws, userId, testId, duration, startedAt }) => {
 
         await testRef.update({ status: "expired" });
 
+
+
         sockets.forEach((s) => {
           if (s.readyState === WebSocket.OPEN) {
             s.send(
@@ -251,6 +253,10 @@ const startScreeningTimer = ({ ws, userId, testId, duration, startedAt }) => {
             );
           }
         });
+
+          await cleanupAssignedTasks(userId);
+
+
       }
     } catch (err) {
       console.error("Screening timer error:", err);
@@ -1363,6 +1369,9 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
             }
           }
 
+            await cleanupAssignedTasks(data.uid);
+
+
           break;
 
         case "cancelTask":
@@ -1419,6 +1428,9 @@ if (user.dailyTaskTaken >= DAILY_LIMIT) {
               }),
             );
           }
+
+            await cleanupAssignedTasks(data.uid);
+
 
           break;
 
@@ -1570,6 +1582,46 @@ adminUIDS.forEach((uid) => {
       console.error("Admin authentication failed", err);
     });
 });
+
+
+async function cleanupAssignedTasks(userId) {
+  try {
+    // Check if there are any pending tasks
+    const pendingTasks = await firestore
+      .collection("Users")
+      .doc(userId)
+      .collection("assignedTasks")
+      .where("status", "==", "Pending")
+      .get();
+
+    // If no pending tasks exist, delete the entire assignedTasks collection
+    if (pendingTasks.empty) {
+      const allTasks = await firestore
+        .collection("Users")
+        .doc(userId)
+        .collection("assignedTasks")
+        .get();
+
+      // Delete all documents in the collection
+      const batch = firestore.batch();
+      allTasks.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      
+      await batch.commit();
+      
+      // Update user document to indicate no active tasks
+      await firestore.collection("Users").doc(userId).update({
+        hasTasks: false,
+        taskID: null
+      });
+      
+      console.log(`✅ Cleaned up assignedTasks for user ${userId} - no pending tasks remaining`);
+    }
+  } catch (error) {
+    console.error(`Error cleaning up assignedTasks for user ${userId}:`, error);
+  }
+}
 
 // claims end
 
